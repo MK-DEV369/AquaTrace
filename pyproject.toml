@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ship-analytics"
+version = "0.1.0"
+description = "Real-time AIS vessel tracking and route analytics"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "confluent-kafka>=2.6,<3",
+  "fastapi>=0.115,<1",
+  "httpx>=0.27,<1",
+  "pandas>=2.2,<3",
+  "pydantic>=2.9,<3",
+  "pydantic-settings>=2.5,<3",
+  "psycopg[binary]>=3.2,<4",
+  "python-dotenv>=1.0,<2",
+  "streamlit>=1.39,<2",
+  "uvicorn[standard]>=0.30,<1",
+  "websockets>=13,<16",
+  "geoalchemy2>=0.20,<1",
+  "shapely>=2.0,<3",
+  "geopandas>=1.0,<2",
+  "scikit-learn>=1.5,<2",
+  "numpy>=2.0,<3",
+  "sentence-transformers>=3.0,<4",
+  "spacy>=3.8,<4",
+]
+
+[project.optional-dependencies]
+processing = [
+  "pyspark==3.5.5",
+]
+analytics = [
+  "geopandas>=1.0,<2",
+  "numpy>=2.0,<3",
+  "pandas>=2.2,<3",
+  "scikit-learn>=1.5,<2",
+  "shapely>=2.0,<3",
+  "geoalchemy2>=0.20,<1",
+]
+dev = [
+  "mypy>=1.13,<2",
+  "pre-commit>=4,<5",
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24,<1",
+  "ruff>=0.7,<1",
+  "testcontainers[kafka,postgres]>=4.8,<5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ship_analytics"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "services", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+

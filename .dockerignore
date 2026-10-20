@@ -1,0 +1,13 @@
+.git
+.venv
+__pycache__
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.env
+checkpoints
+data/raw
+data/processed
+data/models
+Spa phase 1.pdf
+
