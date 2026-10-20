@@ -1,15 +1,10 @@
 """Natural language analytics for Phase 2: Query assistant with safe analytical tools."""
 
 from datetime import datetime
-from typing import Dict, List, Optional, Union
 
 import numpy as np
-import pandas as pd
-from sentence_transformers import SentenceTransformer
 import spacy
-from typing import List
-
-from ship_analytics.schemas import AisEvent
+from sentence_transformers import SentenceTransformer
 
 
 class NaturalLanguageProcessor:
@@ -38,11 +33,11 @@ class NaturalLanguageProcessor:
 
     def index_knowledge_base(
         self,
-        project_docs: List[Dict],
-        api_docs: List[Dict],
-        metric_definitions: List[Dict],
-        limitations: List[Dict],
-    ) -> Dict[str, float]:
+        project_docs: list[dict],
+        api_docs: list[dict],
+        metric_definitions: list[dict],
+        limitations: list[dict],
+    ) -> dict[str, float]:
         """Index knowledge base for semantic search.
 
         Args:
@@ -119,9 +114,9 @@ class NaturalLanguageProcessor:
         self,
         tool_name: str,
         description: str,
-        function_schema: Dict,
-        validation_rules: Optional[Dict] = None,
-    ) -> Dict[str, str]:
+        function_schema: dict,
+        validation_rules: dict | None = None,
+    ) -> dict[str, str]:
         """Register a safe analytical tool.
 
         Args:
@@ -153,9 +148,9 @@ class NaturalLanguageProcessor:
     def process_query(
         self,
         query: str,
-        context: Optional[Dict] = None,
-        user_preferences: Optional[Dict] = None,
-    ) -> Dict[str, Union[str, List, Dict, bool]]:
+        context: dict | None = None,
+        user_preferences: dict | None = None,
+    ) -> dict[str, str | list | dict | bool]:
         """Process a natural language query.
 
         Args:
@@ -197,9 +192,9 @@ class NaturalLanguageProcessor:
     def _parse_query(
         self,
         query: str,
-        context: Optional[Dict],
-        user_preferences: Optional[Dict],
-    ) -> Dict[str, Union[str, List, Dict]]:
+        context: dict | None,
+        user_preferences: dict | None,
+    ) -> dict[str, str | list | dict]:
         """Parse and understand natural language query."""
         parsed = {
             "original_query": query,
@@ -243,7 +238,7 @@ class NaturalLanguageProcessor:
         else:
             return "general_question"
 
-    def _extract_entities(self, query: str) -> List[str]:
+    def _extract_entities(self, query: str) -> list[str]:
         """Extract named entities from query."""
         if self.nlp_model:
             try:
@@ -254,7 +249,7 @@ class NaturalLanguageProcessor:
                 return []
         return []
 
-    def _extract_time_range(self, query: str, context: Optional[Dict]) -> Dict[str, Optional[datetime]]:
+    def _extract_time_range(self, query: str, context: dict | None) -> dict[str, datetime | None]:
         """Extract time range from query."""
         time_range = {"start": None, "end": None}
 
@@ -271,7 +266,7 @@ class NaturalLanguageProcessor:
         ]
 
         for pattern in time_patterns:
-            matches = re.findall(pattern, query)
+            re.findall(pattern, query)
             # TODO: Convert matches to datetime objects and set time_range
 
         # Use context if available
@@ -280,7 +275,7 @@ class NaturalLanguageProcessor:
 
         return time_range
 
-    def _extract_geography(self, query: str) -> Optional[Dict[str, float]]:
+    def _extract_geography(self, query: str) -> dict[str, float] | None:
         """Extract geographic bounds from query."""
         # Look for bounding box patterns like "bbox 1.15 103.55 1.45 104.10"
         import re
@@ -302,7 +297,7 @@ class NaturalLanguageProcessor:
 
         return None
 
-    def _extract_vessel_types(self, query: str) -> List[str]:
+    def _extract_vessel_types(self, query: str) -> list[str]:
         """Extract vessel types from query."""
         vessel_types = []
         query_lower = query.lower()
@@ -321,7 +316,7 @@ class NaturalLanguageProcessor:
 
         return vessel_types
 
-    def _extract_metrics(self, query: str) -> List[str]:
+    def _extract_metrics(self, query: str) -> list[str]:
         """Extract metrics from query."""
         metric_keywords = {
             "speed": ["speed", "velocity", "sog"],
@@ -360,8 +355,8 @@ class NaturalLanguageProcessor:
 
     def _validate_user_permissions(
         self,
-        user_preferences: Optional[Dict],
-        required_tools: List[str],
+        user_preferences: dict | None,
+        required_tools: list[str],
     ) -> bool:
         """Validate user permissions for requested tools."""
         if not user_preferences:
@@ -390,10 +385,10 @@ class NaturalLanguageProcessor:
     def _execute_tool(
         self,
         tool_name: str,
-        parsed_query: Dict,
-        context: Optional[Dict],
-        user_preferences: Optional[Dict],
-    ) -> Dict[str, Union[str, List, Dict]]:
+        parsed_query: dict,
+        context: dict | None,
+        user_preferences: dict | None,
+    ) -> dict[str, str | list | dict]:
         """Execute a tool with validated inputs."""
         if tool_name not in self.tool_registry:
             return self._create_error_response(f"Tool '{tool_name}' not found")
@@ -421,11 +416,11 @@ class NaturalLanguageProcessor:
 
     def _validate_tool_inputs(
         self,
-        tool: Dict,
-        parsed_query: Dict,
-        context: Optional[Dict],
-        user_preferences: Optional[Dict],
-    ) -> Dict[str, Union[bool, str]]:
+        tool: dict,
+        parsed_query: dict,
+        context: dict | None,
+        user_preferences: dict | None,
+    ) -> dict[str, bool | str]:
         """Validate tool inputs against schema and rules."""
         # Check if tool schema exists
         if "schema" not in tool:
@@ -453,9 +448,9 @@ class NaturalLanguageProcessor:
 
     def _simulate_tool_execution(
         self,
-        tool: Dict,
-        validated_inputs: Dict,
-    ) -> Dict[str, Union[str, List, Dict]]:
+        tool: dict,
+        validated_inputs: dict,
+    ) -> dict[str, str | list | dict]:
         """Simulate tool execution (placeholder for real implementations)."""
         tool_name = tool["name"]
         description = tool["description"]
@@ -483,7 +478,7 @@ class NaturalLanguageProcessor:
             },
         }
 
-    def _create_refusal_response(self, reason: str) -> Dict[str, str]:
+    def _create_refusal_response(self, reason: str) -> dict[str, str]:
         """Create a refusal response for unsafe queries."""
         return {
             "status": "refused",
@@ -496,7 +491,7 @@ class NaturalLanguageProcessor:
             ],
         }
 
-    def _create_error_response(self, error: str) -> Dict[str, str]:
+    def _create_error_response(self, error: str) -> dict[str, str]:
         """Create an error response."""
         return {
             "status": "error",
@@ -506,9 +501,9 @@ class NaturalLanguageProcessor:
 
     def _format_query_response(
         self,
-        tool_results: List[Dict],
-        parsed_query: Dict,
-    ) -> Dict[str, Union[str, List, Dict, bool]]:
+        tool_results: list[dict],
+        parsed_query: dict,
+    ) -> dict[str, str | list | dict | bool]:
         """Format query results for the user."""
         return {
             "query": parsed_query["original_query"],

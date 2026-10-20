@@ -3,7 +3,8 @@
 
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+
 
 def check_file_exists(path, description):
     """Check if a file exists."""
@@ -43,7 +44,7 @@ def test_anomaly_detection():
         from ship_analytics.schemas import AisEvent
 
         detector = AnomalyDetector()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Create test events with large enough distance to trigger invalid jump
         event1 = AisEvent(
@@ -85,11 +86,11 @@ def test_window_calculation():
     """Test window calculation functionality."""
     print("\nTesting window calculation:")
     try:
-        from ship_analytics.windows import WindowCalculator
         from ship_analytics.schemas import AisEvent
+        from ship_analytics.windows import WindowCalculator
 
         calculator = WindowCalculator(window_minutes=60)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         events = []
         for i in range(3):

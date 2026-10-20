@@ -1,20 +1,18 @@
 """Database schema definitions for Ship Analytics."""
 
+from geoalchemy2 import Geography
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Column,
     DateTime,
+    Float,
     Integer,
     MetaData,
-    String,
-    Float,
-    JSON,
     PrimaryKeyConstraint,
+    String,
     Table,
 )
-
-from geoalchemy2 import Geography
-
 
 metadata = MetaData()
 

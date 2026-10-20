@@ -1,12 +1,11 @@
 """Window metrics calculation for AIS events."""
 
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from ship_analytics.schemas import AisEvent
 from ship_analytics.anomalies import Anomaly
+from ship_analytics.schemas import AisEvent
 
 
 class WindowMetrics(BaseModel):
@@ -18,7 +17,7 @@ class WindowMetrics(BaseModel):
     active_vessel_count: int = 0
     mean_speed_knots: float | None = None
     median_speed_knots: float | None = None
-    vessel_type_counts: Dict[str, int] = Field(default_factory=dict)
+    vessel_type_counts: dict[str, int] = Field(default_factory=dict)
     anomaly_count: int = 0
 
 
@@ -30,10 +29,10 @@ class WindowCalculator:
 
     def calculate_metrics(
         self,
-        events: List[AisEvent],
+        events: list[AisEvent],
         window_start: datetime,
         window_end: datetime,
-        anomalies: Optional[List[Anomaly]] = None,
+        anomalies: list[Anomaly] | None = None,
     ) -> WindowMetrics:
         """Calculate all metrics for a given window."""
         window_events = [
@@ -53,7 +52,7 @@ class WindowCalculator:
         active_vessels = set(e.mmsi for e in window_events)
         speeds = [e.sog_knots for e in window_events if e.sog_knots is not None]
 
-        vessel_type_counts: Dict[str, int] = {}
+        vessel_type_counts: dict[str, int] = {}
         for event in window_events:
             if event.vessel_type:
                 vessel_type_counts[event.vessel_type] = (
@@ -88,9 +87,9 @@ class WindowCalculator:
 
     def tumbling_windows(
         self,
-        events: List[AisEvent],
-        anomalies: Optional[List[Anomaly]] = None,
-    ) -> List[WindowMetrics]:
+        events: list[AisEvent],
+        anomalies: list[Anomaly] | None = None,
+    ) -> list[WindowMetrics]:
         """Generate tumbling windows for a series of events."""
         if not events:
             return []
@@ -99,7 +98,7 @@ class WindowCalculator:
         min_time = sorted_events[0].event_time
         max_time = sorted_events[-1].event_time
 
-        windows: List[WindowMetrics] = []
+        windows: list[WindowMetrics] = []
         window_start = datetime.fromtimestamp(
             (min_time.timestamp() // (self.window_minutes * 60)) * (self.window_minutes * 60),
             tz=min_time.tzinfo,

@@ -1,14 +1,14 @@
 """Comprehensive tests for Phase 1 implementation."""
 
-import pytest
-from datetime import datetime, timezone, timedelta
-from decimal import Decimal
+from datetime import UTC, datetime, timedelta
 
-from ship_analytics.schemas import AisEvent
+import pytest
+
 from ship_analytics.anomalies import AnomalyDetector
-from ship_analytics.windows import WindowCalculator
 from ship_analytics.config import get_settings
 from ship_analytics.kafka import ensure_topics
+from ship_analytics.schemas import AisEvent
+from ship_analytics.windows import WindowCalculator
 
 
 class TestAisEventSchema:
@@ -16,7 +16,7 @@ class TestAisEventSchema:
 
     def test_valid_event(self):
         """Test that valid AIS events are accepted."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event_data = {
             "event_id": "replay:123456789:2026-10-19T09:00:00Z:1",
             "source": "replay",
@@ -34,7 +34,7 @@ class TestAisEventSchema:
 
     def test_invalid_mmsi_rejected(self):
         """Test that events with invalid MMSI are rejected."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event_data = {
             "event_id": "replay:123456789:2026-10-19T09:00:00Z:1",
             "source": "replay",
@@ -50,7 +50,7 @@ class TestAisEventSchema:
 
     def test_invalid_latitude_rejected(self):
         """Test that events with invalid latitude are rejected."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event_data = {
             "event_id": "replay:123456789:2026-10-19T09:00:00Z:1",
             "source": "replay",
@@ -82,7 +82,7 @@ class TestAisEventSchema:
 
     def test_canonical_event_id(self):
         """Test event ID format validation."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event_data = {
             "event_id": "test:123:2026-01-01T00:00:00Z:suffix",  # Valid format
             "source": "replay",
@@ -107,7 +107,7 @@ class TestAnomalyDetector:
 
     def test_invalid_jump_detection(self):
         """Test detection of invalid jump anomalies."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         previous = AisEvent(
             event_id="event_000001",
             source="replay",
@@ -137,7 +137,7 @@ class TestAnomalyDetector:
 
     def test_no_invalid_jump_for_small_movement(self):
         """Test that small movements don't trigger invalid jump."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         previous = AisEvent(
             event_id="event_000001",
             source="replay",
@@ -165,7 +165,7 @@ class TestAnomalyDetector:
 
     def test_reporting_gap_detection(self):
         """Test detection of reporting gap anomalies."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         previous = AisEvent(
             event_id="event_000001",
             source="replay",
@@ -196,7 +196,7 @@ class TestAnomalyDetector:
 
     def test_no_reporting_gap_for_non_underway(self):
         """Test that non-underway vessels don't trigger reporting gap."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         previous = AisEvent(
             event_id="event_000001",
             source="replay",
@@ -226,7 +226,7 @@ class TestAnomalyDetector:
 
     def test_speed_threshold_detection(self):
         """Test detection of speed threshold anomalies."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = AisEvent(
             event_id="event_000001",
             source="replay",
@@ -246,7 +246,7 @@ class TestAnomalyDetector:
 
     def test_sharp_course_change_detection(self):
         """Test detection of sharp course change anomalies."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         previous = AisEvent(
             event_id="event_000001",
             source="replay",
@@ -276,7 +276,7 @@ class TestAnomalyDetector:
 
     def test_anomaly_severity_levels(self):
         """Test that different anomalies have appropriate severity levels."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Invalid jump should be high severity
         previous = AisEvent(
@@ -356,7 +356,7 @@ class TestWindowCalculator:
 
     def test_empty_window(self):
         """Test calculation for window with no events."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         events = []
         anomalies = []
 
@@ -369,7 +369,7 @@ class TestWindowCalculator:
 
     def test_window_with_single_event(self):
         """Test calculation for window with single event."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = AisEvent(
             event_id="event_000001",
             source="replay",
@@ -393,7 +393,7 @@ class TestWindowCalculator:
 
     def test_multiple_vessels_window(self):
         """Test calculation for window with multiple vessels."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event1 = AisEvent(
             event_id="event_000001",
             source="replay",
@@ -427,7 +427,7 @@ class TestWindowCalculator:
 
     def test_window_with_anomalies(self):
         """Test calculation for window with anomalies."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event = AisEvent(
             event_id="event_000001",
             source="replay",
@@ -460,7 +460,7 @@ class TestWindowCalculator:
 
     def test_tumbling_windows(self):
         """Test generation of tumbling windows."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         events = []
         for i in range(10):
             event = AisEvent(
@@ -483,7 +483,7 @@ class TestWindowCalculator:
 
     def test_window_boundaries(self):
         """Test that events are correctly assigned to windows."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         event1 = AisEvent(
             event_id="event_000001",
             source="replay",
@@ -528,7 +528,7 @@ class TestIntegration:
         processor = AISProcessor()
 
         # Create mock events
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         events = []
         for i in range(5):
             event = AisEvent(

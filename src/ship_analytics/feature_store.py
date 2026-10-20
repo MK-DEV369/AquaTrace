@@ -1,12 +1,9 @@
 """Feature store implementation for Phase 2: Materialize vessel behavior features for ML."""
 
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 
-import geopandas as gpd
 import numpy as np
 import pandas as pd
-from shapely.geometry import Point, LineString
 from sqlalchemy import create_engine, text
 
 from ship_analytics.config import get_settings
@@ -22,10 +19,10 @@ class FeatureStore:
 
     def extract_temporal_features(
         self,
-        all_events: List[AisEvent],
+        all_events: list[AisEvent],
         target_event: AisEvent,
         window_minutes: int = 60,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Extract temporal features for a target event.
 
         Args:
@@ -114,7 +111,7 @@ class FeatureStore:
 
     def _calculate_time_weighted_speed(
         self,
-        events: List[AisEvent],
+        events: list[AisEvent],
         target_index: int,
         window_minutes: int,
     ) -> float:
@@ -152,7 +149,7 @@ class FeatureStore:
 
     def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate great-circle distance between two points in kilometers."""
-        from math import radians, sin, cos, sqrt, atan2
+        from math import atan2, cos, radians, sin, sqrt
 
         R = 6371  # Earth radius in km
 
@@ -166,7 +163,7 @@ class FeatureStore:
 
         return R * c
 
-    def store_features(self, vessel_mmsi: int, features: Dict[str, float]) -> None:
+    def store_features(self, vessel_mmsi: int, features: dict[str, float]) -> None:
         """Store features in the feature store (Parquet + PostGIS)."""
         # Store to Parquet format
         df = pd.DataFrame([features])
@@ -178,7 +175,7 @@ class FeatureStore:
         # Store spatial features to PostGIS
         self._store_spatial_features(vessel_mmsi, features)
 
-    def _store_spatial_features(self, vessel_mmsi: int, features: Dict[str, float]) -> None:
+    def _store_spatial_features(self, vessel_mmsi: int, features: dict[str, float]) -> None:
         """Store spatial features to PostGIS."""
         with self.engine.connect() as conn:
             # This would store vessel position and features
@@ -210,9 +207,9 @@ class FeatureStore:
 
     def generate_windowed_features(
         self,
-        events: List[AisEvent],
+        events: list[AisEvent],
         window_minutes: int = 60,
-    ) -> List[Dict[str, float]]:
+    ) -> list[dict[str, float]]:
         """Generate windowed features for all events."""
         features_list = []
 
@@ -237,8 +234,8 @@ class FeatureStore:
 
     def _aggregate_window_features(
         self,
-        events: List[AisEvent],
-    ) -> Dict[str, float]:
+        events: list[AisEvent],
+    ) -> dict[str, float]:
         """Aggregate features over a time window."""
         if not events:
             return {}

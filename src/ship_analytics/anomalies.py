@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta
-from typing import List, Literal, TYPE_CHECKING
+from datetime import datetime
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 from shapely.geometry import Point
@@ -7,7 +7,7 @@ from shapely.geometry import Point
 from ship_analytics.schemas import AisEvent
 
 if TYPE_CHECKING:
-    from ship_analytics.windows import WindowMetrics
+    pass
 
 
 class Anomaly(BaseModel):

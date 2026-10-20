@@ -1,11 +1,8 @@
 """ETA baseline models for Phase 2: Simple and trajectory prediction baselines."""
 
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from datetime import timedelta
 
 import numpy as np
-import pandas as pd
-from shapely.geometry import Point
 
 from ship_analytics.schemas import AisEvent
 
@@ -20,7 +17,7 @@ class ETABaselines:
         self,
         current_event: AisEvent,
         lookback_minutes: int = 120,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Simple ETA baseline: remaining distance / robust recent speed.
 
         Args:
@@ -84,7 +81,7 @@ class ETABaselines:
         self,
         current_event: AisEvent,
         prediction_horizon_minutes: int = 60,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         """Trajectory baseline: predict positions with constant velocity/course.
 
         Args:
@@ -140,7 +137,7 @@ class ETABaselines:
         speed_knots: float,
         course_degrees: float,
         horizon_minutes: int,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Predict vessel position at a given horizon."""
         # Convert speed to km/h
         speed_kmh = speed_knots * 1.852
@@ -180,7 +177,7 @@ class ETABaselines:
     def _calculate_remaining_distance(
         self,
         current_event: AisEvent,
-        vessel_events: List[AisEvent],
+        vessel_events: list[AisEvent],
     ) -> float:
         """Calculate remaining distance to destination.
 
@@ -213,9 +210,9 @@ class ETABaselines:
     def _calculate_trajectory_accuracy(
         self,
         current_event: AisEvent,
-        recent_events: List[AisEvent],
-        predictions: List[Dict],
-    ) -> Dict[str, float]:
+        recent_events: list[AisEvent],
+        predictions: list[dict],
+    ) -> dict[str, float]:
         """Calculate trajectory prediction accuracy."""
         if len(recent_events) < 3:
             return {
@@ -223,9 +220,6 @@ class ETABaselines:
                 "median_absolute_error_nm": None,
                 "p95_geodesic_error_nm": None,
             }
-
-        # Use most recent position as reference
-        most_recent = recent_events[-1]
 
         errors = []
         for pred in predictions:
@@ -274,7 +268,7 @@ class ETABaselines:
     def _get_default_eta_prediction(
         self,
         current_event: AisEvent,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Return default ETA prediction when insufficient data."""
         return {
             "eta_hours": None,
@@ -292,7 +286,7 @@ class ETABaselines:
     def _get_default_trajectory_prediction(
         self,
         current_event: AisEvent,
-    ) -> Dict[str, object]:
+    ) -> dict[str, object]:
         """Return default trajectory prediction when insufficient data."""
         return {
             "predictions": [],
@@ -310,7 +304,7 @@ class ETABaselines:
 
     def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate great-circle distance between two points in kilometers."""
-        from math import radians, sin, cos, sqrt, atan2
+        from math import atan2, cos, radians, sin, sqrt
 
         R = 6371  # Earth radius in km
 
@@ -339,7 +333,7 @@ class ETABaselines:
             if e.event_time >= cutoff_time
         ]
 
-    def train_baselines(self, events: List[AisEvent]) -> Dict[str, Dict]:
+    def train_baselines(self, events: list[AisEvent]) -> dict[str, dict]:
         """Train baseline models on given events."""
         baselines = {}
 
@@ -371,10 +365,10 @@ class ETABaselines:
 
     def evaluate_baselines(
         self,
-        test_events: List[AisEvent],
-        simple_baseline_results: Dict,
-        trajectory_baseline_results: Dict,
-    ) -> Dict[str, Dict[str, float]]:
+        test_events: list[AisEvent],
+        simple_baseline_results: dict,
+        trajectory_baseline_results: dict,
+    ) -> dict[str, dict[str, float]]:
         """Evaluate baseline performance on test data."""
         evaluation_results = {
             "simple_baseline": {

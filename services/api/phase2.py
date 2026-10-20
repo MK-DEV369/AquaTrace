@@ -1,19 +1,17 @@
 """Phase 2 API extensions for natural language analytics and advanced ML features."""
 
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Union
 
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import text
 
-from ship_analytics.config import get_settings
-from ship_analytics.schemas import AisEvent
 from ship_analytics.etabaselines import ETABaselines
 from ship_analytics.feature_store import FeatureStore
 from ship_analytics.mlmodels import MLModels
 from ship_analytics.natural_language import NaturalLanguageProcessor
+from ship_analytics.schemas import AisEvent
 
 # Create router for inclusion in main app
 router = APIRouter(prefix="", tags=["phase2"])
@@ -29,8 +27,6 @@ _nl_processor.initialize()
 @router.get("/health/detailed")
 def detailed_health() -> dict[str, object]:
     """Detailed health check including Phase 2 components."""
-    settings = get_settings()
-
     health_status = {
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat(),
@@ -112,7 +108,7 @@ def eta_predictions(mmsi: int, window_minutes: int = 120) -> dict[str, object]:
 
 @router.get("/ml/anomaly-detection")
 def ml_anomaly_detection(
-    mmsi: Optional[int] = None,
+    mmsi: int | None = None,
     threshold: float = 0.5,
     limit: int = 100,
 ) -> dict[str, object]:
@@ -172,7 +168,7 @@ def ml_anomaly_detection(
 
 @router.get("/routes/discover")
 def discover_routes(
-    mmsi: Optional[int] = None,
+    mmsi: int | None = None,
     min_similarity: float = 0.7,
     limit: int = 10,
 ) -> dict[str, object]:
@@ -265,8 +261,8 @@ def discover_routes(
 @router.get("/natural-language/query")
 def natural_language_query(
     query: str,
-    user_context: Optional[Dict] = None,
-    user_preferences: Optional[Dict] = None,
+    user_context: dict | None = None,
+    user_preferences: dict | None = None,
 ) -> dict[str, object]:
     """Process natural language queries for vessel analytics.
 
@@ -300,8 +296,8 @@ def natural_language_query(
 def register_natural_language_tool(
     tool_name: str,
     description: str,
-    tool_schema: Dict,
-    validation_rules: Optional[Dict] = None,
+    tool_schema: dict,
+    validation_rules: dict | None = None,
 ) -> dict[str, str]:
     """Register a new tool for natural language processing.
 
@@ -357,8 +353,8 @@ async def websocket_advanced_updates(websocket: WebSocket):
 def _generate_ml_anomalies_sample(
     threshold: float,
     limit: int,
-    mmsi: Optional[int],
-) -> List[Dict]:
+    mmsi: int | None,
+) -> list[dict]:
     """Generate sample ML anomalies for demonstration."""
     anomalies = []
     anomaly_types = ["speed_anomaly", "course_anomaly", "position_anomaly", "behavior_anomaly"]

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -7,7 +7,7 @@ from ship_analytics.schemas import AisEvent
 
 
 def valid_event() -> dict[str, object]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return {
         "event_id": "replay:123456789:2026-10-19T09:00:00Z:1",
         "source": "replay",

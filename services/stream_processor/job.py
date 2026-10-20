@@ -1,14 +1,22 @@
 """Stream processor job for Phase 1: validate, deduplicate, publish, and persist AIS events."""
 
-from datetime import timezone
+from datetime import UTC, datetime
+
 import psycopg
 from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import col, from_json, lit, struct, to_json
-from pyspark.sql.types import DoubleType, IntegerType, StringType, StructField, StructType, TimestampType
+from pyspark.sql.functions import col, from_json, lit
+from pyspark.sql.types import (
+    DoubleType,
+    IntegerType,
+    StringType,
+    StructField,
+    StructType,
+    TimestampType,
+)
 
+from ship_analytics.anomalies import AnomalyDetector
 from ship_analytics.config import get_settings
 from ship_analytics.schemas import AisEvent
-from ship_analytics.anomalies import AnomalyDetector
 from ship_analytics.windows import WindowCalculator
 
 EVENT_SCHEMA = StructType(
@@ -27,6 +35,13 @@ EVENT_SCHEMA = StructType(
         StructField("vessel_type", StringType(), True),
     ]
 )
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Treat Spark's timezone-naive timestamps as UTC."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 class AISProcessor:
@@ -104,8 +119,8 @@ class AISProcessor:
                     event_id=event["event_id"],
                     source=event["source"],
                     mmsi=event["mmsi"],
-                    event_time=event["event_time"],
-                    ingested_at=event["ingested_at"],
+                    event_time=_as_utc(event["event_time"]),
+                    ingested_at=_as_utc(event["ingested_at"]),
                     latitude=event["latitude"],
                     longitude=event["longitude"],
                     sog_knots=event["sog_knots"],
@@ -191,8 +206,8 @@ class AISProcessor:
                 event_id=row[0],
                 source=row[1],
                 mmsi=row[2],
-                event_time=row[3].replace(tzinfo=timezone.utc),
-                ingested_at=row[4].replace(tzinfo=timezone.utc),
+                event_time=_as_utc(row[3]),
+                ingested_at=_as_utc(row[4]),
                 latitude=row[5],
                 longitude=row[6],
                 sog_knots=row[7],
@@ -205,7 +220,7 @@ class AISProcessor:
 
         self.detect_and_categorize_anomalies(events)
         self.calculate_window_metrics(events)
-        self.upsert_to_postgis(batch_df, 0)
+        self.upsert_to_postgis(clean_df, 0)
 
 
 def main() -> None:

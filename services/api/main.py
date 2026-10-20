@@ -1,18 +1,14 @@
 """Ship Analytics API - Real-time vessel tracking and anomaly detection."""
 
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.routing import APIRouter
-from psycopg.rows import dict_row
 from psycopg import AsyncConnection
+from psycopg.rows import dict_row
 
+from services.api.phase2 import router as phase2_router
 from ship_analytics.config import get_settings
-from ship_analytics.schemas import AisEvent
-from ship_analytics.anomalies import AnomalyDetector
-from ship_analytics.windows import WindowCalculator
 
 app = FastAPI(title="Ship Analytics API", version="0.2.0")
 
@@ -66,25 +62,67 @@ async def health() -> dict[str, str]:
 
 @app.get("/metrics/summary")
 async def summary(window_minutes: int = 5) -> dict[str, object]:
-    """Return metrics for the last time window."""
+    """Return metrics for the latest available time window."""
+    if window_minutes <= 0:
+        raise HTTPException(status_code=422, detail="window_minutes must be positive")
+
     async with await connection() as conn, conn.cursor() as cursor:
         await cursor.execute(
             """
+            WITH latest AS (
+                SELECT MAX(event_time) AS latest_event_time
+                FROM ais_event_clean
+            ),
+            reference AS (
+                SELECT
+                    latest_event_time,
+                    CASE
+                        WHEN latest_event_time IS NULL
+                            OR latest_event_time >= now() - make_interval(mins => %s)
+                        THEN now()
+                        ELSE latest_event_time
+                    END AS reference_time
+                FROM latest
+            )
             SELECT
-              COUNT(*) FILTER (WHERE event_time >= now() - make_interval(mins => %s)) AS event_count,
-              COUNT(DISTINCT mmsi) FILTER (WHERE event_time >= now() - make_interval(mins => %s)) AS active_vessels,
-              AVG(sog_knots) FILTER (WHERE event_time >= now() - make_interval(mins => %s)) AS average_speed_knots
+              reference.reference_time,
+              reference.latest_event_time,
+              COUNT(*) FILTER (
+                  WHERE event_time >= reference.reference_time - make_interval(mins => %s)
+              ) AS event_count,
+              COUNT(DISTINCT mmsi) FILTER (
+                  WHERE event_time >= reference.reference_time - make_interval(mins => %s)
+              ) AS active_vessels,
+              AVG(sog_knots) FILTER (
+                  WHERE event_time >= reference.reference_time - make_interval(mins => %s)
+              ) AS average_speed_knots
             FROM ais_event_clean
+            CROSS JOIN reference
+            GROUP BY reference.reference_time, reference.latest_event_time
             """,
-            (window_minutes, window_minutes, window_minutes),
+            (window_minutes, window_minutes, window_minutes, window_minutes),
         )
         metrics = await cursor.fetchone() or {}
+        reference_time = metrics.get("reference_time")
         await cursor.execute(
-            "SELECT COUNT(*) AS anomaly_count FROM anomaly WHERE event_time >= now() - make_interval(mins => %s)",
-            (window_minutes,),
+            """
+            SELECT COUNT(*) AS anomaly_count
+            FROM anomaly
+            WHERE event_time >= %s - make_interval(mins => %s)
+            """,
+            (reference_time or datetime.now(UTC), window_minutes),
         )
         anomalies = await cursor.fetchone() or {}
-    return {"window_minutes": window_minutes, **metrics, **anomalies}
+    return {
+        "window_minutes": window_minutes,
+        "reference_time": reference_time,
+        "historical_reference": (
+            reference_time is not None
+            and reference_time < datetime.now(UTC) - timedelta(minutes=window_minutes)
+        ),
+        **metrics,
+        **anomalies,
+    }
 
 
 @app.get("/vessels")
@@ -150,8 +188,8 @@ async def vessel_track(mmsi: int, start: datetime, end: datetime) -> dict[str, o
 async def anomalies(
     from_time: datetime,
     to_time: datetime,
-    anomaly_type: Optional[str] = None,
-    bbox: Optional[tuple[float, float, float, float]] = None,
+    anomaly_type: str | None = None,
+    bbox: tuple[float, float, float, float] | None = None,
 ) -> list[dict[str, object]]:
     """Return anomaly events within a time range."""
     async with await connection() as conn, conn.cursor() as cursor:
@@ -181,12 +219,10 @@ async def anomalies(
 @app.get("/window-metrics")
 async def window_metrics(
     window_minutes: int = 60,
-    metric_names: Optional[str] = None,
-    dimensions: Optional[str] = None,
+    metric_names: str | None = None,
+    dimensions: str | None = None,
 ) -> list[dict[str, object]]:
     """Return window metrics for time periods."""
-    window_calculator = WindowCalculator(window_minutes)
-
     async with await connection() as conn, conn.cursor() as cursor:
         await cursor.execute("SELECT event_time FROM ais_event_clean ORDER BY event_time LIMIT 100")
         events = [row["event_time"] for row in await cursor.fetchall()]
@@ -244,7 +280,4 @@ async def websocket_updates(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-
-from services.api.phase2 import router as phase2_router
 app.include_router(phase2_router)
-

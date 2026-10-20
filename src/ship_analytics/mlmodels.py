@@ -1,13 +1,11 @@
 """ML models for Phase 2: Isolation Forest anomaly detection and route discovery."""
 
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+from sklearn.cluster import DBSCAN
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import DBSCAN
 
 from ship_analytics.schemas import AisEvent
 
@@ -29,8 +27,8 @@ class MLModels:
     def train_isolation_forest(
         self,
         training_data: pd.DataFrame,
-        feature_columns: List[str],
-    ) -> Dict[str, float]:
+        feature_columns: list[str],
+    ) -> dict[str, float]:
         """Train Isolation Forest for anomaly detection.
 
         Args:
@@ -56,8 +54,11 @@ class MLModels:
 
         # Calculate metrics
         from sklearn.metrics import (
-            accuracy_score, precision_score, recall_score,
-            f1_score, roc_auc_score, confusion_matrix
+            accuracy_score,
+            f1_score,
+            precision_score,
+            recall_score,
+            roc_auc_score,
         )
 
         metrics = {
@@ -79,9 +80,9 @@ class MLModels:
 
     def detect_anomalies_ml(
         self,
-        events: List[AisEvent],
-        feature_columns: List[str],
-    ) -> List[Dict[str, float]]:
+        events: list[AisEvent],
+        feature_columns: list[str],
+    ) -> list[dict[str, float]]:
         """Detect anomalies using trained Isolation Forest.
 
         Args:
@@ -131,7 +132,9 @@ class MLModels:
 
         # Create anomaly results
         anomalies = []
-        for i, (event, score, prediction) in enumerate(zip(events, anomaly_scores, predictions)):
+        for i, (event, score, prediction) in enumerate(
+            zip(events, anomaly_scores, predictions, strict=False)
+        ):
             if prediction == -1:  # Anomaly detected
                 anomalies.append({
                     "event_id": event.event_id,
@@ -155,7 +158,7 @@ class MLModels:
         else:
             return "low"
 
-    def _create_basic_features(self, event: AisEvent) -> Dict[str, float]:
+    def _create_basic_features(self, event: AisEvent) -> dict[str, float]:
         """Create basic features for an event."""
         features = {
             "sog_knots": event.sog_knots or 0.0,
@@ -170,8 +173,8 @@ class MLModels:
 
     def train_route_clusterer(
         self,
-        vessel_events: List[AisEvent],
-    ) -> Dict[str, float]:
+        vessel_events: list[AisEvent],
+    ) -> dict[str, float]:
         """Train DBSCAN for route discovery and clustering.
 
         Args:
@@ -225,8 +228,8 @@ class MLModels:
 
     def discover_routes(
         self,
-        vessel_events: List[AisEvent],
-    ) -> Dict[str, object]:
+        vessel_events: list[AisEvent],
+    ) -> dict[str, object]:
         """Discover vessel routes and cluster similar patterns.
 
         Args:
@@ -318,8 +321,8 @@ class MLModels:
     def _extract_spatial_features(
         self,
         event: AisEvent,
-        all_events: List[AisEvent],
-    ) -> List[float]:
+        all_events: list[AisEvent],
+    ) -> list[float]:
         """Extract spatial features for route clustering."""
         # Find recent events for this vessel
         vessel_events = [e for e in all_events if e.mmsi == event.mmsi]
@@ -352,7 +355,7 @@ class MLModels:
 
         return features
 
-    def _calculate_route_distance(self, lats: List[float], lons: List[float]) -> float:
+    def _calculate_route_distance(self, lats: list[float], lons: list[float]) -> float:
         """Calculate total route distance using haversine formula."""
         if len(lats) < 2:
             return 0.0
@@ -366,14 +369,10 @@ class MLModels:
 
         return total_distance
 
-    def _calculate_route_confidence(self, events: List[AisEvent]) -> float:
+    def _calculate_route_confidence(self, events: list[AisEvent]) -> float:
         """Calculate confidence score for route detection."""
         if len(events) < 3:
             return 0.0
-
-        # Calculate route regularity
-        lats = [e.latitude for e in events]
-        lons = [e.longitude for e in events]
 
         # Calculate distances between consecutive points
         distances = []
@@ -403,7 +402,7 @@ class MLModels:
 
     def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate great-circle distance between two points in kilometers."""
-        from math import radians, sin, cos, sqrt, atan2
+        from math import atan2, cos, radians, sin, sqrt
 
         R = 6371  # Earth radius in km
 
@@ -420,8 +419,8 @@ class MLModels:
     def train_ml_models(
         self,
         training_data: pd.DataFrame,
-        feature_columns: List[str],
-    ) -> Dict[str, Dict[str, float]]:
+        feature_columns: list[str],
+    ) -> dict[str, dict[str, float]]:
         """Train all ML models and return performance metrics."""
         results = {}
 
