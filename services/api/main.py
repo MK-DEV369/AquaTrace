@@ -1,6 +1,9 @@
 """Ship Analytics API - Real-time vessel tracking and anomaly detection."""
 
 from datetime import UTC, datetime, timedelta
+import os
+from contextlib import asynccontextmanager
+from typing import Optional
 
 import psycopg
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -8,9 +11,19 @@ from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
 from services.api.phase2 import router as phase2_router
+from services.websocket.handler import WebSocketHandler, get_websocket_handler
 from ship_analytics.config import get_settings
 
-app = FastAPI(title="Ship Analytics API", version="0.2.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize enhanced WebSocket handler on startup."""
+    websocket_handler = await get_websocket_handler()
+    app.state.websocket_handler = websocket_handler
+    yield
+
+
+app = FastAPI(title="Ship Analytics API", version="0.2.0", lifespan=lifespan)
 
 
 async def connection() -> AsyncConnection[dict[str, object]]:
@@ -264,10 +277,18 @@ async def window_metrics(
 
 
 @app.websocket("/ws/updates")
-async def websocket_updates(websocket: WebSocket):
-    """WebSocket endpoint for real-time updates."""
-    await manager.connect(websocket)
+async def websocket_updates(websocket: WebSocket, token: Optional[str] = None):
+    """Enhanced WebSocket endpoint for real-time updates with authentication."""
+    # Get the enhanced WebSocket handler
+    websocket_handler = app.state.websocket_handler
+    await websocket_handler.handle_websocket(websocket, token)
+    
 
+@app.websocket("/ws/updates-legacy")
+async def websocket_updates_legacy(websocket: WebSocket):
+    """Legacy WebSocket endpoint for backward compatibility."""
+    await manager.connect(websocket)
+    
     try:
         while True:
             data = await websocket.receive_json()

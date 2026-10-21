@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir --no-deps . && \
         "streamlit>=1.39,<2" \
         "uvicorn[standard]>=0.30,<1" \
         "websockets>=13,<16" \
+        "PyJWT>=2.9,<3" \
         "geoalchemy2>=0.20,<1" \
         "shapely>=2.0,<3" \
         "geopandas>=1.0,<2" \
