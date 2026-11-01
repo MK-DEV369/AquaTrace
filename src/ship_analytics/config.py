@@ -13,9 +13,9 @@ class Settings(BaseSettings):
     aisstream_api_key: str | None = None
     log_level: str = "INFO"
     jwt_secret: str = "change_this_jwt_secret_in_production"
+    api_token: str | None = None
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

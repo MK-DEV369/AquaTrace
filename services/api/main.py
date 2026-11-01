@@ -1,17 +1,17 @@
 """Ship Analytics API - Real-time vessel tracking and anomaly detection."""
 
-from datetime import UTC, datetime, timedelta
-import os
+import secrets
 from contextlib import asynccontextmanager
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 import psycopg
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi.responses import JSONResponse
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
 from services.api.phase2 import router as phase2_router
-from services.websocket.handler import WebSocketHandler, get_websocket_handler
+from services.websocket.handler import get_websocket_handler
 from ship_analytics.config import get_settings
 
 
@@ -24,6 +24,24 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Ship Analytics API", version="0.2.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def require_api_token(request: Request, call_next):
+    """Protect API routes while leaving health and documentation probes public."""
+    if request.url.path in {"/health", "/docs", "/openapi.json", "/redoc"}:
+        return await call_next(request)
+
+    configured_token = get_settings().api_token
+    supplied_token = request.headers.get("authorization", "")
+    if not configured_token or not supplied_token.startswith("Bearer "):
+        return JSONResponse(status_code=401, content={"detail": "authentication required"})
+
+    token = supplied_token[7:].strip()
+    if not token or not secrets.compare_digest(token, configured_token):
+        return JSONResponse(status_code=401, content={"detail": "invalid authentication token"})
+
+    return await call_next(request)
 
 
 async def connection() -> AsyncConnection[dict[str, object]]:
@@ -277,28 +295,11 @@ async def window_metrics(
 
 
 @app.websocket("/ws/updates")
-async def websocket_updates(websocket: WebSocket, token: Optional[str] = None):
+async def websocket_updates(websocket: WebSocket, token: str | None = None):
     """Enhanced WebSocket endpoint for real-time updates with authentication."""
     # Get the enhanced WebSocket handler
     websocket_handler = app.state.websocket_handler
     await websocket_handler.handle_websocket(websocket, token)
     
-
-@app.websocket("/ws/updates-legacy")
-async def websocket_updates_legacy(websocket: WebSocket):
-    """Legacy WebSocket endpoint for backward compatibility."""
-    await manager.connect(websocket)
-    
-    try:
-        while True:
-            data = await websocket.receive_json()
-            # Process incoming messages if needed
-            await manager.send_update({
-                "type": "client_message",
-                "data": data,
-                "timestamp": datetime.utcnow().isoformat(),
-            })
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
 
 app.include_router(phase2_router)

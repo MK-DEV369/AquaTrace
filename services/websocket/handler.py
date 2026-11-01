@@ -4,13 +4,18 @@ import asyncio
 from datetime import datetime
 from typing import Optional
 
-from fastapi import WebSocket, WebSocketDisconnect, Depends, HTTPException
+from fastapi import Depends, HTTPException, WebSocket, WebSocketDisconnect
 
 from services.websocket.connection_manager import EnhancedConnectionManager
 from services.websocket.schemas import (
-    WebSocketMessage, AuthenticationMessage, UpdateMessage, 
-    QueryMessage, AnalyticsUpdate, RouteDiscoveryUpdate, MLModelUpdate,
-    SystemStatusMessage
+    AnalyticsUpdate,
+    AuthenticationMessage,
+    MLModelUpdate,
+    QueryMessage,
+    RouteDiscoveryUpdate,
+    SystemStatusMessage,
+    UpdateMessage,
+    WebSocketMessage,
 )
 from ship_analytics.config import get_settings
 
@@ -30,6 +35,7 @@ class WebSocketHandler:
     
     async def handle_websocket(self, websocket: WebSocket, token: Optional[str] = None):
         """Handle WebSocket connection with authentication."""
+        connection_id = None
         try:
             # Connect with authentication
             connection_id = await self.connection_manager.connect(websocket, token)
@@ -64,7 +70,8 @@ class WebSocketHandler:
                 "timestamp": datetime.utcnow().isoformat(),
             })
         finally:
-            self.connection_manager.disconnect(connection_id)
+            if connection_id is not None:
+                self.connection_manager.disconnect(connection_id)
     
     async def _handle_messages(self, connection_id: str, user_id: str):
         """Handle incoming WebSocket messages."""

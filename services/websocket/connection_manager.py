@@ -4,7 +4,6 @@ import asyncio
 import time
 import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Set, Optional, Callable
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -14,25 +13,24 @@ try:
 except ImportError:
     pyjwt = None
     JWT_AVAILABLE = False
-import hashlib
 
 
 class EnhancedConnectionManager:
     """Production-ready WebSocket connection manager with authentication and rate limiting."""
     
     def __init__(self, jwt_secret: str, rate_limit_per_minute: int = 60):
-        self.active_connections: Dict[str, WebSocket] = {}
-        self.user_connections: Dict[str, Set[str]] = {}
-        self.connection_metadata: Dict[str, dict] = {}
-        self.rate_limiters: Dict[str, RateLimiter] = {}
-        self.heartbeat_tasks: Dict[str, asyncio.Task] = {}
+        self.active_connections: dict[str, WebSocket] = {}
+        self.user_connections: dict[str, set[str]] = {}
+        self.connection_metadata: dict[str, dict] = {}
+        self.rate_limiters: dict[str, RateLimiter] = {}
+        self.heartbeat_tasks: dict[str, asyncio.Task] = {}
         self.subscription_manager = SubscriptionManager()
         self.jwt_secret = jwt_secret
         self.rate_limit_per_minute = rate_limit_per_minute
         self.max_connections = 1000
         self.connection_ttl = timedelta(minutes=30)
     
-    async def connect(self, websocket: WebSocket, user_id: Optional[str] = None) -> str:
+    async def connect(self, websocket: WebSocket, user_id: str | None = None) -> str:
         """Connect a WebSocket with optional authentication.
         
         Args:
@@ -90,7 +88,6 @@ class EnhancedConnectionManager:
         
         # Remove from active connections
         if connection_id in self.active_connections:
-            websocket = self.active_connections[connection_id]
             del self.active_connections[connection_id]
         
         # Remove from user connections
@@ -129,7 +126,7 @@ class EnhancedConnectionManager:
             self.disconnect(connection_id)
             return False
     
-    async def broadcast_update(self, message: dict, user_id: Optional[str] = None):
+    async def broadcast_update(self, message: dict, user_id: str | None = None):
         """Broadcast an update to all connected clients, optionally filtered by user."""
         connections = self.active_connections.copy()
         
@@ -143,10 +140,10 @@ class EnhancedConnectionManager:
             }
         
         # Send to all connections
-        for connection_id, websocket in connections.items():
+        for connection_id, _websocket in connections.items():
             await self.send_update(connection_id, message)
     
-    async def subscribe(self, connection_id: str, channel: str, filter_criteria: Optional[dict] = None):
+    async def subscribe(self, connection_id: str, channel: str, filter_criteria: dict | None = None):
         """Subscribe a connection to a specific channel."""
         if connection_id not in self.active_connections:
             return False
@@ -184,7 +181,7 @@ class EnhancedConnectionManager:
         for connection_id in expired_connections:
             self.disconnect(connection_id)
     
-    async def _authenticate_connection(self, websocket: WebSocket, user_id: Optional[str]) -> dict:
+    async def _authenticate_connection(self, websocket: WebSocket, user_id: str | None) -> dict:
         """Authenticate a WebSocket connection."""
         # Extract token from query parameters or headers
         token = self._extract_token(websocket)
@@ -201,15 +198,10 @@ class EnhancedConnectionManager:
             except (pyjwt.InvalidTokenError, AttributeError):
                 pass
         
-        # Fallback to anonymous connection
-        return {
-            "user_id": f"anonymous_{int(time.time())}",
-            "username": "anonymous",
-            "permissions": ["read"],
-            "authenticated": False,
-        }
+        await websocket.close(code=1008, reason="Authentication required")
+        raise PermissionError("valid WebSocket authentication token required")
     
-    def _extract_token(self, websocket: WebSocket) -> Optional[str]:
+    def _extract_token(self, websocket: WebSocket) -> str | None:
         """Extract authentication token from WebSocket."""
         # Check query parameters
         query_string = websocket.url.query
@@ -267,7 +259,7 @@ class RateLimiter:
     
     def __init__(self, max_requests: int):
         self.max_requests = max_requests
-        self.requests: List[float] = []
+        self.requests: list[float] = []
         self.lock = asyncio.Lock()
     
     async def is_allowed(self) -> bool:
@@ -291,10 +283,10 @@ class SubscriptionManager:
     """Manage WebSocket subscriptions to different channels."""
     
     def __init__(self):
-        self.subscriptions: Dict[str, Dict[str, Set[dict]]] = {}
+        self.subscriptions: dict[str, dict[str, set[dict]]] = {}
         self.lock = asyncio.Lock()
     
-    async def subscribe(self, connection_id: str, channel: str, filter_criteria: Optional[dict] = None):
+    async def subscribe(self, connection_id: str, channel: str, filter_criteria: dict | None = None):
         """Subscribe a connection to a channel with optional filters."""
         async with self.lock:
             if channel not in self.subscriptions:
@@ -312,7 +304,7 @@ class SubscriptionManager:
             if channel in self.subscriptions and connection_id in self.subscriptions[channel]:
                 del self.subscriptions[channel][connection_id]
     
-    async def get_subscribers(self, channel: str, filter_criteria: Optional[dict] = None) -> Set[str]:
+    async def get_subscribers(self, channel: str, filter_criteria: dict | None = None) -> set[str]:
         """Get all subscribers for a channel that match the filter criteria."""
         async with self.lock:
             if channel not in self.subscriptions:

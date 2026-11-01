@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ship
       POSTGRES_PASSWORD: ship_dev_password
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
@@ -19,7 +19,7 @@ services:
   kafka:
     image: apache/kafka:4.2.0
     ports:
-      - "29092:29092"
+      - "127.0.0.1:29092:29092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -45,8 +45,9 @@ services:
     environment:
       SHIP_DATABASE_URL: postgresql://ship:ship_dev_password@postgres:5432/ship
       SHIP_KAFKA_BROKERS: kafka:9092
+      SHIP_API_TOKEN: dev-api-token-change-me
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -56,6 +57,7 @@ services:
     command: streamlit run services/dashboard/app.py --server.address 0.0.0.0 --server.port 8501
     environment:
       API_BASE_URL: http://api:8000
+      API_AUTH_TOKEN: dev-api-token-change-me
     ports:
       - "8501:8501"
     depends_on:
