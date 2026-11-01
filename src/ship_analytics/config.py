@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://ship:ship_dev_password@localhost:5432/ship"
     aisstream_api_key: str | None = None
     log_level: str = "INFO"
+    jwt_secret: str = "change_this_jwt_secret_in_production"
 
 
 @lru_cache

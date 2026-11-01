@@ -22,7 +22,7 @@ try:
     handler = WebSocketHandler(manager)
     print('WebSocketHandler instantiated')
     
-    print('\n✅ WebSocket infrastructure is working correctly!')
+    print('\n[OK] WebSocket infrastructure is working correctly!')
     
 except Exception as e:
     print('WebSocket infrastructure failed:', str(e))
