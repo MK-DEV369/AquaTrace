@@ -4,16 +4,13 @@ This test demonstrates the atomic, consistent, isolated, durable (ACID) principl
 in action across all enhanced components.
 """
 
-import asyncio
-import pytest
-from datetime import datetime, timedelta
-from typing import Dict, Any
+from datetime import timedelta
 
-from services.agent.tools import get_vessel_snapshot, get_recent_anomalies, get_vessel_track
-from services.agent.investigation_agent import MaritimeInvestigationAgent, InvestigationRequest
-from services.agent.transaction_manager import TransactionCoordinator, transaction_coordinator
-from services.agent.resource_manager import ResourceManager
-from services.auth.zero_trust import zero_trust_manager, SecurityAuditor
+import pytest
+from fastapi import HTTPException
+from services.agent.investigation_agent import InvestigationRequest, MaritimeInvestigationAgent
+from services.agent.transaction_manager import transaction_coordinator
+from services.auth.zero_trust import SecurityAuditor, zero_trust_manager
 
 
 class TestEnhancedAtomicity:
@@ -22,24 +19,18 @@ class TestEnhancedAtomicity:
     @pytest.mark.asyncio
     async def test_transaction_coordinator_basic(self):
         """Test basic transaction coordinator functionality."""
-        # Create investigation request
-        request = InvestigationRequest(
-            question="Investigate vessel 533002002 for recent anomalies",
-            max_tools=3
-        )
-        
         # Create transaction
         transaction_id = transaction_coordinator.create_transaction("test_inv_123")
-        
+
         # Add actions to transaction
-        action1_id = transaction_coordinator.add_action_to_transaction(
+        transaction_coordinator.add_action_to_transaction(
             transaction_id,
             "investigation",
             "get_vessel_snapshot",
             {"mmsi": 533002002}
         )
         
-        action2_id = transaction_coordinator.add_action_to_transaction(
+        transaction_coordinator.add_action_to_transaction(
             transaction_id,
             "investigation",
             "get_recent_anomalies",
@@ -63,7 +54,7 @@ class TestEnhancedAtomicity:
         transaction_id = transaction_coordinator.create_transaction("test_inv_456")
         
         # Add failing action
-        action_id = transaction_coordinator.add_action_to_transaction(
+        transaction_coordinator.add_action_to_transaction(
             transaction_id,
             "investigation",
             "get_vessel_snapshot",
@@ -71,14 +62,13 @@ class TestEnhancedAtomicity:
         )
         
         # Execute transaction (should fail and rollback)
-        try:
+        with pytest.raises(HTTPException):
             await transaction_coordinator.execute_transaction(transaction_id)
-            assert False, "Transaction should have failed"
-        except Exception:
-            # Verify transaction is in rolled back state
-            status = transaction_coordinator.get_transaction_status(transaction_id)
-            assert status['state'] == "rolled_back"
-            assert "failed_actions" in status
+
+        # Verify transaction is in rolled back state
+        status = transaction_coordinator.get_transaction_status(transaction_id)
+        assert status['state'] == "rolled_back"
+        assert "failed_actions" in status
     
     @pytest.mark.asyncio
     async def test_action_isolation(self):
@@ -88,14 +78,14 @@ class TestEnhancedAtomicity:
         transaction2_id = transaction_coordinator.create_transaction("test_inv_789b")
         
         # Add same action to both transactions
-        action1_id = transaction_coordinator.add_action_to_transaction(
+        transaction_coordinator.add_action_to_transaction(
             transaction1_id,
             "investigation",
             "get_vessel_snapshot",
             {"mmsi": 533002002}
         )
         
-        action2_id = transaction_coordinator.add_action_to_transaction(
+        transaction_coordinator.add_action_to_transaction(
             transaction2_id,
             "investigation",
             "get_vessel_snapshot",
@@ -268,8 +258,6 @@ class TestEnhancedDurability:
     @pytest.mark.asyncio
     async def test_audit_log_durability(self):
         """Test audit log durability and persistence."""
-        from services.auth.zero_trust import SecurityAuditor
-        
         auditor = SecurityAuditor(zero_trust_manager)
         
         # Log multiple security events
@@ -289,7 +277,7 @@ class TestEnhancedDurability:
         
         # Verify report contains expected data
         assert report['total_events'] == 10
-        assert report['checksum_valid'] == True
+        assert report['checksum_valid']
         assert 'generated_at' in report
     
     @pytest.mark.asyncio
@@ -298,14 +286,14 @@ class TestEnhancedDurability:
         # Create and complete a transaction
         transaction_id = transaction_coordinator.create_transaction("durability_test")
         
-        action_id = transaction_coordinator.add_action_to_transaction(
+        transaction_coordinator.add_action_to_transaction(
             transaction_id,
             "investigation",
             "get_vessel_snapshot",
             {"mmsi": 533002002}
         )
         
-        result = await transaction_coordinator.execute_transaction(transaction_id)
+        await transaction_coordinator.execute_transaction(transaction_id)
         
         # Verify transaction is persisted
         status = transaction_coordinator.get_transaction_status(transaction_id)
@@ -472,7 +460,7 @@ class TestEndToEndIntegration:
         )
         
         # Add action to transaction
-        action_id = transaction_coordinator.add_action_to_transaction(
+        transaction_coordinator.add_action_to_transaction(
             transaction_id,
             "investigation",
             "get_vessel_snapshot",
@@ -533,7 +521,7 @@ class TestEndToEndIntegration:
         )
         
         # Add action to transaction
-        action_id = transaction_coordinator.add_action_to_transaction(
+        transaction_coordinator.add_action_to_transaction(
             transaction_id,
             "investigation",
             "get_vessel_snapshot",
@@ -541,7 +529,7 @@ class TestEndToEndIntegration:
         )
         
         # Execute transaction with resource isolation
-        result = await transaction_coordinator.execute_transaction(transaction_id)
+        await transaction_coordinator.execute_transaction(transaction_id)
         
         # Verify both resources were properly managed
         resource = await resource_manager.get_resource(resource_id)

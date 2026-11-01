@@ -5,15 +5,17 @@ Simple test to validate the AquaTrace AI Maritime Investigation Agent implementa
 
 import sys
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime
+
 
 def test_basic_imports():
     """Test basic imports."""
     print("Testing basic imports...")
     
     try:
-        from services.agent.tools import get_vessel_snapshot
+        from services.agent import tools
         print("✓ tools module imported successfully")
+        print(f"✓ Imported module: {tools.__name__}")
         return True
     except Exception as e:
         print(f"✗ Failed to import tools: {e}")
@@ -24,15 +26,18 @@ def test_investigation_agent_import():
     print("Testing investigation agent import...")
     
     try:
-        from services.agent.investigation_agent import MaritimeInvestigationAgent, InvestigationRequest
+        from services.agent.investigation_agent import (
+            InvestigationRequest,
+            MaritimeInvestigationAgent,
+        )
         print("✓ investigation_agent module imported successfully")
         
         # Test creating agent instance
-        agent = MaritimeInvestigationAgent()
+        MaritimeInvestigationAgent()
         print("✓ MaritimeInvestigationAgent created successfully")
         
         # Test creating investigation request
-        request = InvestigationRequest(
+        InvestigationRequest(
             question="Test investigation",
             context={"user_id": "test"},
             max_tools=3
@@ -127,7 +132,10 @@ def test_agent_session_creation():
     print("Testing agent session creation...")
     
     try:
-        from services.agent.investigation_agent import MaritimeInvestigationAgent, InvestigationRequest
+        from services.agent.investigation_agent import (
+            InvestigationRequest,
+            MaritimeInvestigationAgent,
+        )
         
         agent = MaritimeInvestigationAgent()
         
