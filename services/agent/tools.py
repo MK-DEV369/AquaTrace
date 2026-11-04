@@ -58,13 +58,18 @@ async def get_vessel_snapshot(mmsi: int) -> dict[str, Any]:
         async with await connection() as conn, conn.cursor() as cursor:
             await cursor.execute(
                 """
-                SELECT event_time, ST_Y(geom) AS latitude, ST_X(geom) AS longitude,
-                       sog_knots, cog_degrees, vessel_type, heading_degrees, 
-                       nav_status, source, event_id
-                FROM vessel_latest 
-                WHERE mmsi = %s 
-                ORDER BY event_time DESC 
-                LIMIT 1
+                SELECT v.event_time, ST_Y(v.geom) AS latitude, ST_X(v.geom) AS longitude,
+                       v.sog_knots, v.cog_degrees, v.vessel_type,
+                       e.heading_degrees, e.nav_status, e.source, e.event_id
+                FROM vessel_latest v
+                LEFT JOIN LATERAL (
+                    SELECT heading_degrees, nav_status, source, event_id
+                    FROM ais_event_clean
+                    WHERE mmsi = v.mmsi
+                    ORDER BY event_time DESC
+                    LIMIT 1
+                ) e ON TRUE
+                WHERE v.mmsi = %s
                 """,
                 (query.mmsi,)
             )
@@ -120,7 +125,7 @@ async def get_recent_anomalies(mmsi: int, time_range: timedelta = timedelta(hour
                 """
                 SELECT id, event_time, anomaly_type, severity, explanation,
                        ST_Y(geom) AS latitude, ST_X(geom) AS longitude,
-                       evidence_json, source
+                       evidence_json, 'rule-engine' AS source
                 FROM anomaly
                 WHERE mmsi = %s 
                 AND event_time >= %s
@@ -589,8 +594,50 @@ async def draft_incident_report(mmsi: int, anomaly_id: int | None = None) -> dic
             status_code=500,
             detail=f"Error drafting incident report: {str(e)}"
         )
+
+
+async def get_fleet_summary() -> dict[str, Any]:
+    """Return an aggregate, read-only picture of the currently stored fleet."""
+    async with await connection() as conn, conn.cursor() as cursor:
+        await cursor.execute(
+            """
+            SELECT COUNT(*) AS active_vessels, AVG(sog_knots) AS average_speed_knots,
+                   MAX(event_time) AS latest_observation
+            FROM vessel_latest
+            """
+        )
+        summary = await cursor.fetchone() or {}
+        await cursor.execute(
+            """
+            SELECT vessel_type, COUNT(*) AS count
+            FROM vessel_latest
+            GROUP BY vessel_type
+            ORDER BY count DESC
+            """
+        )
+        summary["vessel_types"] = list(await cursor.fetchall())
+        await cursor.execute(
+            """
+            SELECT source, COUNT(DISTINCT mmsi) AS vessels
+            FROM ais_event_clean
+            WHERE event_time >= now() - interval '24 hours'
+            GROUP BY source ORDER BY source
+            """
+        )
+        summary["sources"] = list(await cursor.fetchall())
+        await cursor.execute(
+            """
+            SELECT severity, COUNT(*) AS count
+            FROM anomaly
+            WHERE event_time >= now() - interval '24 hours'
+            GROUP BY severity ORDER BY severity
+            """
+        )
+        summary["anomalies"] = list(await cursor.fetchall())
+    return summary
 # Public tool registry - maps tool names to functions
 TOOL_REGISTRY = {
+    "get_fleet_summary": get_fleet_summary,
     "get_vessel_snapshot": get_vessel_snapshot,
     "get_recent_anomalies": get_recent_anomalies,
     "get_vessel_track": get_vessel_track,
@@ -601,6 +648,13 @@ TOOL_REGISTRY = {
 
 # Tool metadata for API documentation
 TOOL_METADATA = {
+    "get_fleet_summary": {
+        "description": "Retrieve active vessel, source, type, and anomaly totals",
+        "parameters": [],
+        "returns": "current fleet summary",
+        "safety_level": "safe",
+        "category": "fleet_overview"
+    },
     "get_vessel_snapshot": {
         "description": "Retrieve the latest stored position, speed, course and timestamp",
         "parameters": [{"name": "mmsi", "type": "integer", "required": True}],
@@ -710,7 +764,9 @@ async def execute_tool(tool_name: str, parameters: dict[str, Any]) -> dict[str, 
     # Convert parameter values based on expected types
     converted_params = {}
     
-    if tool_name == "get_vessel_snapshot":
+    if tool_name == "get_fleet_summary":
+        converted_params = {}
+    elif tool_name == "get_vessel_snapshot":
         converted_params["mmsi"] = int(parameters.get("mmsi"))
     
     elif tool_name == "get_recent_anomalies":

@@ -2,19 +2,22 @@
 
 import secrets
 import uuid
+from math import asin, atan2, cos, degrees, radians, sin
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 import psycopg
-from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from psycopg import AsyncConnection
 
 from services.api.phase2 import router as phase2_router
 from services.websocket.handler import get_websocket_handler
 from ship_analytics.agents import get_orchestrator, get_registry
 from ship_analytics.config import get_settings
-from ship_analytics.logging import configure_logging, get_correlation_id, set_correlation_id
+from ship_analytics.logging import configure_logging, get_correlation_id, get_logger, set_correlation_id
 from ship_analytics.metrics import render as render_metrics
 
 
@@ -32,55 +35,89 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Ship Analytics API", version="0.2.0", lifespan=lifespan)
+app.mount("/force-graph", StaticFiles(directory="services/force_graph", html=True), name="force-graph")
 app.include_router(phase2_router)
+logger = get_logger("api")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    """Prevent browsers from receiving an authentication error for a missing favicon."""
+    return Response(status_code=204)
 
 
 @app.middleware("http")
-async def correlation_id_middleware(request: Request, call_next):
-    """Generate or propagate X-Correlation-ID and bind it to logging context."""
+async def request_context_and_auth(request: Request, call_next):
+    """Attach correlation IDs and enforce API access before dispatching a request."""
     cid = request.headers.get("x-correlation-id") or uuid.uuid4().hex
     set_correlation_id(cid)
-    response = await call_next(request)
-    response.headers["X-Correlation-ID"] = cid
-    return response
-
-
-@app.middleware("http")
-async def require_api_token(request: Request, call_next):
-    """Protect API routes while leaving health and documentation probes public."""
-    if request.url.path in {"/health", "/docs", "/openapi.json", "/redoc", "/metrics", "/agents", "/agents/trace"}:
-        return await call_next(request)
+    public_paths = {
+        "/health", "/docs", "/openapi.json", "/redoc", "/metrics", "/agents", "/agents/trace", "/favicon.ico",
+    }
+    local_graph_data = (
+        request.url.path == "/force-graph-data"
+        and get_settings().environment.lower() in {"local", "development", "test"}
+    )
+    if request.url.path in public_paths or request.url.path.startswith("/force-graph/") or local_graph_data:
+        response = await call_next(request)
+        response.headers["X-Correlation-ID"] = cid
+        return response
 
     configured_token = get_settings().api_token
     supplied_token = request.headers.get("authorization", "")
     if not configured_token or not supplied_token.startswith("Bearer "):
-        return JSONResponse(
+        response = JSONResponse(
             status_code=401,
-            content={"error": "authentication required", "correlation_id": get_correlation_id()},
+            content={"error": "authentication required", "correlation_id": cid},
         )
+        response.headers["X-Correlation-ID"] = cid
+        return response
 
     token = supplied_token[7:].strip()
     if not token or not secrets.compare_digest(token, configured_token):
-        return JSONResponse(
+        response = JSONResponse(
             status_code=401,
-            content={"error": "invalid authentication token", "correlation_id": get_correlation_id()},
+            content={"error": "invalid authentication token", "correlation_id": cid},
         )
+        response.headers["X-Correlation-ID"] = cid
+        return response
 
-    return await call_next(request)
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = cid
+    return response
 
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     """Return a generic error envelope; never leak raw exception details."""
     cid = get_correlation_id()
-    if isinstance(exc, HTTPException):
-        return JSONResponse(
-            status_code=exc.status_code,
-            content={"error": "request failed", "correlation_id": cid, "path": str(request.url.path)},
-        )
+    logger.exception("unhandled api error path=%s", request.url.path)
     return JSONResponse(
         status_code=500,
         content={"error": "internal server error", "correlation_id": cid, "path": str(request.url.path)},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Keep expected HTTP failures useful without exposing implementation details."""
+    cid = get_correlation_id()
+    message = "service unavailable" if exc.status_code >= 500 else "request rejected"
+    logger.warning("api request rejected status=%d path=%s", exc.status_code, request.url.path)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": message, "correlation_id": cid, "path": str(request.url.path)},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Avoid returning unbounded framework validation detail to clients."""
+    cid = get_correlation_id()
+    logger.info("invalid api request path=%s errors=%d", request.url.path, len(exc.errors()))
+    return JSONResponse(
+        status_code=422,
+        content={"error": "invalid request", "correlation_id": cid, "path": str(request.url.path)},
     )
 
 
@@ -222,15 +259,30 @@ async def vessels(limit: int = 200) -> list[dict[str, object]]:
         return list(await cursor.fetchall())
 
 
+@app.get("/force-graph-data", include_in_schema=False)
+async def force_graph_data(limit: int = 400) -> list[dict[str, object]]:
+    """Serve graph data without exposing an API token in the browser during local demos."""
+    return await vessels(limit=min(limit, 1_000))
+
+
 @app.get("/vessels/{mmsi}")
 async def vessel(mmsi: int) -> dict[str, object]:
     """Return the latest state for a specific vessel."""
     async with await connection() as conn, conn.cursor() as cursor:
         await cursor.execute(
             """
-            SELECT event_time, ST_Y(geom) AS latitude, ST_X(geom) AS longitude,
-                   sog_knots, cog_degrees, vessel_type, heading_degrees, nav_status
-            FROM vessel_latest WHERE mmsi = %s ORDER BY event_time DESC LIMIT 1
+            SELECT v.event_time, ST_Y(v.geom) AS latitude, ST_X(v.geom) AS longitude,
+                   v.sog_knots, v.cog_degrees, v.vessel_type,
+                   e.heading_degrees, e.nav_status, e.source
+            FROM vessel_latest v
+            LEFT JOIN LATERAL (
+                SELECT heading_degrees, nav_status, source
+                FROM ais_event_clean
+                WHERE mmsi = v.mmsi
+                ORDER BY event_time DESC
+                LIMIT 1
+            ) e ON TRUE
+            WHERE v.mmsi = %s
             """,
             (mmsi,),
         )
@@ -263,6 +315,54 @@ async def vessel_track(mmsi: int, start: datetime, end: datetime) -> dict[str, o
             }
             for p in points
         ],
+    }
+
+
+@app.get("/vessels/{mmsi}/route-forecast")
+async def vessel_route_forecast(mmsi: int, horizon_minutes: int = 30, steps: int = 6) -> dict[str, object]:
+    """Project a constant-course, constant-speed route from the latest AIS position."""
+    horizon_minutes = min(max(horizon_minutes, 5), 240)
+    steps = min(max(steps, 2), 24)
+    async with await connection() as conn, conn.cursor() as cursor:
+        await cursor.execute(
+            """
+            SELECT event_time, ST_Y(geom) AS latitude, ST_X(geom) AS longitude,
+                   COALESCE(sog_knots, 0) AS sog_knots, COALESCE(cog_degrees, 0) AS cog_degrees
+            FROM vessel_latest WHERE mmsi = %s
+            """,
+            (mmsi,),
+        )
+        latest = await cursor.fetchone()
+    if not latest:
+        raise HTTPException(status_code=404, detail="vessel not found")
+
+    latitude, longitude = float(latest["latitude"]), float(latest["longitude"])
+    speed, course = float(latest["sog_knots"]), float(latest["cog_degrees"])
+    positions = []
+    for step in range(1, steps + 1):
+        minutes = horizon_minutes * step / steps
+        angular_distance = (speed * (minutes / 60.0)) / 3440.065
+        bearing = radians(course)
+        lat1, lon1 = radians(latitude), radians(longitude)
+        lat2 = asin(sin(lat1) * cos(angular_distance) + cos(lat1) * sin(angular_distance) * cos(bearing))
+        lon2 = lon1 + atan2(
+            sin(bearing) * sin(angular_distance) * cos(lat1),
+            cos(angular_distance) - sin(lat1) * sin(lat2),
+        )
+        positions.append(
+            {
+                "minutes_ahead": round(minutes),
+                "latitude": degrees(lat2),
+                "longitude": (degrees(lon2) + 540) % 360 - 180,
+                "sog_knots": speed,
+                "cog_degrees": course,
+            }
+        )
+    return {
+        "mmsi": mmsi,
+        "method": "constant_course_speed",
+        "observed_at": latest["event_time"],
+        "positions": positions,
     }
 
 

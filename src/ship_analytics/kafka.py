@@ -4,7 +4,6 @@ TOPICS = (
     "ais.raw",
     "ais.clean",
     "ais.invalid",
-    "ais.anomalies",
     "ais.anomaly",
     "ais.prediction",
     "ais.alert",

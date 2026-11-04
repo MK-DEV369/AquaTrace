@@ -874,23 +874,76 @@ docker network ls
 Then replace `ship_default` in the `docker run` command with the actual network
 name.
 
-### 4. Replay Events for the Demonstration
+### 4. Select a Demonstration Data Source
 
-With the stack running, replay the sample AIS data:
+The `producer` service is live AISStream by default. It reads
+`SHIP_AISSTREAM_API_KEY` only on the backend and uses
+`SHIP_AISSTREAM_BBOX` (the Miami bounding box in `.env.example`). Never put
+the API key in browser code.
 
 ```powershell
-docker compose exec api python -m services.producer.replay
+docker compose logs -f producer
 ```
 
-Keep the Spark logs, Redpanda Console, and dashboard open at the same time.
-New events should appear in `ais.raw`, then flow through the Spark sinks and
-update the database-backed dashboard metrics.
-
-For a live external AIS stream, configure the required AISStream credentials
-and run the AISStream producer instead of the replay producer:
+For a dense, deterministic dashboard and 3D graph, run the one-time local
+bootstrap below. The included day file currently contains 918 valid unique
+vessels after filtering out base stations and malformed records:
 
 ```powershell
-docker compose exec api python -m services.producer.aisstream
+docker compose run --rm --no-deps -e SHIP_EVENT_SOURCE=static -e SHIP_STATIC_VESSELS=1000 producer
+```
+
+The static source emits current event times by default so records are not
+dropped by Spark's late-data watermark. To make the primary producer use the
+six-event sample instead, set `SHIP_EVENT_SOURCE=replay` in `.env` and recreate
+the service:
+
+```powershell
+docker compose up -d --force-recreate producer
+```
+
+Open the dashboard at `http://localhost:8501` and the browser-facing Three.js
+graph at `http://localhost:8000/force-graph/`. `http://api:8000` is Docker's
+internal service name and is not a host-browser URL.
+
+The force graph is a React `react-force-graph-3d` component with Three.js
+`UnrealBloomPass`. Cargo, Tanker, Passenger, Fishing, and Tug vessels use
+distinct emissive colors. It intentionally does **not** poll every few seconds:
+the force simulation remains stable until the operator presses **Refresh data**.
+
+### 5. Dashboard Data Semantics
+
+- The map uses a world overview when a dense fleet is loaded, so the live
+  Miami feed, the Malaysia sample route, and the North Sea AISDK bootstrap are
+  all visible. Select an MMSI to zoom to one vessel.
+- AIS feeds often omit ship type on position reports. AquaTrace retains an
+  actual Cargo/Tanker/etc. value when supplied; otherwise it applies a stable
+  per-MMSI demo classification (Cargo, Tanker, Passenger, Fishing, or Tug) so
+  the register remains usable without pretending it is source metadata.
+- Route telemetry separates measured AIS points (cyan) from the amber
+  constant-course/constant-speed projection. A measured trail requires at
+  least two live observations. Seed the Malaysia sample into the current
+  window when demonstrating it:
+
+```powershell
+docker compose run --rm --no-deps producer python -m services.producer.replay --file data/sample/ais_events.jsonl --rate 6 --shift-to-now
+```
+
+- Reporting-gap alerts are limited to 30 minutes–12 hours. Larger jumps are
+  historical-replay artefacts and are not shown as real vessel incidents.
+
+### 6. Query Assistant
+
+The assistant always uses registered read-only investigation tools. When no
+LLM is running, it returns a grounded fleet or vessel summary instead of an
+empty answer. To enable generative wording with local Ollama, start Ollama on
+the host and pull the configured model; Docker reaches it at
+`http://host.docker.internal:11434` by default.
+
+```powershell
+ollama pull qwen2.5:3b
+ollama serve
+docker compose up -d --force-recreate api
 ```
 
 ### 5. Safe Project Rebuild

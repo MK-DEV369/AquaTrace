@@ -33,6 +33,9 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka-data:/var/lib/kafka/data
     healthcheck:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
       interval: 10s
@@ -49,7 +52,12 @@ services:
       SHIP_DATABASE_URL: postgresql://ship:ship_dev_password@postgres:5432/ship
       SHIP_KAFKA_BROKERS: kafka:9092
       SHIP_API_TOKEN: dev-api-token-change-me
-      SHIP_JWT_SECRET: ${SHIP_JWT_SECRET:-local-development-only-change-this-secret}
+      SHIP_JWT_SECRET: ${SHIP_JWT_SECRET:?Set SHIP_JWT_SECRET in .env}
+      SHIP_ENVIRONMENT: local
+      SHIP_LLM_PROVIDER: ${SHIP_LLM_PROVIDER:-ollama}
+      SHIP_LLM_MODEL: ${SHIP_LLM_MODEL:-qwen2.5:3b}
+      SHIP_LLM_BASE_URL: ${SHIP_LLM_BASE_URL:-http://host.docker.internal:11434}
+      SHIP_LLM_API_KEY: ${SHIP_LLM_API_KEY:-}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -65,6 +73,8 @@ services:
     environment:
       API_BASE_URL: http://api:8000
       API_AUTH_TOKEN: dev-api-token-change-me
+      API_DISPLAY_URL: http://localhost:8000
+      FORCE_GRAPH_URL: http://localhost:8000/force-graph/
     ports:
       - "8501:8501"
     depends_on:
@@ -82,15 +92,51 @@ services:
     environment:
       SHIP_DATABASE_URL: postgresql://ship:ship_dev_password@postgres:5432/ship
       SHIP_KAFKA_BROKERS: kafka:9092
-      SHIP_JWT_SECRET: ${SHIP_JWT_SECRET:-local-development-only-change-this-secret}
+      SHIP_JWT_SECRET: ${SHIP_JWT_SECRET:?Set SHIP_JWT_SECRET in .env}
+      SHIP_ENVIRONMENT: local
+      SHIP_CHECKPOINT_DIR: /opt/ship/checkpoints
+      SHIP_KAFKA_STARTING_OFFSET: earliest
     depends_on:
       postgres:
         condition: service_healthy
       kafka:
         condition: service_healthy
     volumes:
-      - spark-checkpoints:/opt/ship/checkpoints
+      - spark-checkpoints-v2:/opt/ship/checkpoints
+
+  producer:
+    image: ship-analytics:production
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        case "$$SHIP_EVENT_SOURCE" in
+          aisstream) exec python -m services.producer.aisstream ;;
+          static) exec python -m services.producer.csv_replay --file data/aisdk-2026-11-01/aisdk-2026-11-01.csv --vessels "$$SHIP_STATIC_VESSELS" --rate "$$SHIP_STATIC_RATE" ;;
+          replay) exec python -m services.producer.replay --file data/sample/ais_events.jsonl --rate 2 --loop ;;
+          *) echo "SHIP_EVENT_SOURCE must be aisstream, static, or replay" >&2; exit 64 ;;
+        esac
+    environment:
+      SHIP_KAFKA_BROKERS: kafka:9092
+      SHIP_JWT_SECRET: ${SHIP_JWT_SECRET:?Set SHIP_JWT_SECRET in .env}
+      SHIP_ENVIRONMENT: local
+      SHIP_EVENT_SOURCE: ${SHIP_EVENT_SOURCE:-aisstream}
+      SHIP_AISSTREAM_API_KEY: ${SHIP_AISSTREAM_API_KEY:-}
+      SHIP_AISSTREAM_BBOX: ${SHIP_AISSTREAM_BBOX:-25.603,-80.208,25.835,-79.879}
+      SHIP_STATIC_VESSELS: ${SHIP_STATIC_VESSELS:-1000}
+      SHIP_STATIC_RATE: ${SHIP_STATIC_RATE:-200}
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./data/aisdk-2026-11-01:/app/data/aisdk-2026-11-01:ro
+    restart: unless-stopped
 
 volumes:
   postgres-data:
   spark-checkpoints:
+  spark-checkpoints-v2:
+  kafka-data:

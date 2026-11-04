@@ -2,7 +2,9 @@ import argparse
 import logging
 import time
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 from confluent_kafka import Producer
 
@@ -13,17 +15,33 @@ from ship_analytics.schemas import AisEvent
 logger = logging.getLogger("producer.replay")
 
 
-def events_from_jsonl(path: Path) -> Iterator[AisEvent]:
+def events_from_jsonl(path: Path, shift_to_now: bool = False) -> Iterator[AisEvent]:
+    parsed: list[AisEvent] = []
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
         try:
-            yield AisEvent.model_validate_json(line)
+            parsed.append(AisEvent.model_validate_json(line))
         except Exception as exc:
             raise ValueError(f"invalid event at {path}:{line_number}") from exc
+    if not shift_to_now or not parsed:
+        yield from parsed
+        return
+    latest = max(event.event_time for event in parsed)
+    run_id = uuid4().hex
+    anchor = datetime.now(UTC)
+    for event in parsed:
+        shifted_time = anchor + (event.event_time - latest)
+        yield event.model_copy(
+            update={
+                "event_id": f"demo:{run_id}:{event.event_id}",
+                "event_time": shifted_time,
+                "ingested_at": shifted_time,
+            }
+        )
 
 
-def publish(path: Path, rate_per_second: float, loop: bool) -> None:
+def publish(path: Path, rate_per_second: float, loop: bool, shift_to_now: bool = False) -> None:
     settings = get_settings()
     ensure_topics(settings.kafka_brokers)
     producer_config = {
@@ -46,7 +64,7 @@ def publish(path: Path, rate_per_second: float, loop: bool) -> None:
 
     while True:
         count = 0
-        for event in events_from_jsonl(path):
+        for event in events_from_jsonl(path, shift_to_now):
             producer.produce(
                 "ais.raw",
                 key=str(event.mmsi),
@@ -66,10 +84,11 @@ def main() -> None:
     parser.add_argument("--file", type=Path, required=True)
     parser.add_argument("--rate", type=float, default=5.0, help="events per second")
     parser.add_argument("--loop", action="store_true")
+    parser.add_argument("--shift-to-now", action="store_true", help="shift historical sample timestamps into the current live window")
     args = parser.parse_args()
     if args.rate <= 0:
         parser.error("--rate must be greater than zero")
-    publish(args.file, args.rate, args.loop)
+    publish(args.file, args.rate, args.loop, args.shift_to_now)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,8 @@ import streamlit as st
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN")
+FORCE_GRAPH_URL = os.getenv("FORCE_GRAPH_URL", "http://localhost:8000/force-graph/")
+API_DISPLAY_URL = os.getenv("API_DISPLAY_URL", API_BASE_URL)
 SHIP_ICON = (
     "data:image/svg+xml;charset=utf-8,"
     "%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' "
@@ -67,8 +69,10 @@ def isoformat(value: datetime) -> str:
 def build_map(
     vessels: pd.DataFrame,
     track: pd.DataFrame,
+    forecast: pd.DataFrame,
     anomalies: pd.DataFrame,
     *,
+    selected_mmsi: int | None,
     show_labels: bool,
     show_route: bool,
     show_anomalies: bool,
@@ -149,6 +153,31 @@ def build_map(
                 ),
             ]
         )
+    if show_route and not forecast.empty:
+        forecast_points = forecast[["longitude", "latitude"]].to_dict("records")
+        forecast_path = [{"path": [[p["longitude"], p["latitude"]] for p in forecast_points]}]
+        layers.extend(
+            [
+                pdk.Layer(
+                    "PathLayer",
+                    data=forecast_path,
+                    get_path="path",
+                    get_color=[255, 192, 92, 220],
+                    width_min_pixels=2,
+                    get_width=3,
+                    opacity=0.85,
+                ),
+                pdk.Layer(
+                    "ScatterplotLayer",
+                    data=forecast,
+                    get_position="[longitude, latitude]",
+                    get_radius=180,
+                    get_fill_color=[255, 192, 92, 230],
+                    radius_min_pixels=3,
+                    radius_max_pixels=7,
+                ),
+            ]
+        )
     if show_anomalies and not anomalies.empty:
         layers.append(
             pdk.Layer(
@@ -167,12 +196,13 @@ def build_map(
         )
     center_lat = float(vessels["latitude"].mean()) if not vessels.empty else 20
     center_lon = float(vessels["longitude"].mean()) if not vessels.empty else 0
+    is_fleet_overview = len(vessels) > 20 and selected_mmsi is None
     return pdk.Deck(
         layers=layers,
         initial_view_state=pdk.ViewState(
-            latitude=center_lat,
-            longitude=center_lon,
-            zoom=3.2 if len(vessels) > 1 else 6,
+            latitude=20 if is_fleet_overview else center_lat,
+            longitude=0 if is_fleet_overview else center_lon,
+            zoom=1.25 if is_fleet_overview else (3.2 if len(vessels) > 1 else 6),
             pitch=35,
         ),
         map_style="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
@@ -202,7 +232,7 @@ if st.sidebar.button("↻ Refresh data", use_container_width=True):
     st.rerun()
 st.sidebar.divider()
 st.sidebar.caption("Data source")
-st.sidebar.code(API_BASE_URL, language="text")
+st.sidebar.code(API_DISPLAY_URL, language="text")
 st.sidebar.caption("Map controls: scroll to zoom • drag to pan • hover a vessel")
 
 try:
@@ -239,6 +269,13 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.caption(f"{mode_label} • reference time: {reference_label} • trail: {trail_minutes} min")
+st.markdown(
+    f'<a href="{FORCE_GRAPH_URL}" target="_blank" '
+    'style="display:inline-block;padding:.55rem .9rem;margin:.25rem 0 1rem;'
+    'border:1px solid #24527a;border-radius:9px;color:#58d6ff;text-decoration:none">'
+    'Open 3D vessel force graph ↗</a>',
+    unsafe_allow_html=True,
+)
 
 columns = st.columns(4)
 columns[0].metric(f"Events · {window_minutes} min", metrics.get("event_count", 0))
@@ -247,7 +284,7 @@ columns[2].metric("Mean speed", f"{metrics.get('average_speed_knots') or 0:.1f} 
 columns[3].metric("Anomalies", metrics.get("anomaly_count", 0))
 
 if vessels.empty:
-    st.info("No processed vessels yet. Start the Spark processor, then run the replay producer.")
+    st.info("No processed vessels yet. Confirm the Spark processor and selected AIS producer are running.")
     st.stop()
 
 vessel_options = ["All vessels"] + [str(mmsi) for mmsi in vessels["mmsi"].unique()]
@@ -267,6 +304,7 @@ if selected_mmsi is not None and show_route:
     )
 
 track = pd.DataFrame()
+forecast = pd.DataFrame()
 if selected_mmsi is not None and show_route:
     start = reference - timedelta(minutes=trail_minutes)
     try:
@@ -289,6 +327,14 @@ if selected_mmsi is not None and show_route:
             track = track.iloc[: max(1, round(len(track) * replay_percent / 100))]
     except requests.RequestException as exc:
         st.warning(f"Could not load route history: {exc}")
+    try:
+        forecast_payload = fetch(
+            f"/vessels/{selected_mmsi}/route-forecast",
+            {"horizon_minutes": 30, "steps": 6},
+        )
+        forecast = pd.DataFrame(forecast_payload.get("positions", []))
+    except requests.RequestException as exc:
+        st.warning(f"Could not load route forecast: {exc}")
 
 anomalies = pd.DataFrame()
 if show_anomalies:
@@ -312,15 +358,17 @@ with map_col:
     st.subheader("Live fleet map")
     if selected_mmsi is not None:
         st.markdown(
-            '<div class="map-note">Cyan dots form the selected vessel\'s dotted trail. '
-            "Red beacons mark anomaly events.</div>",
+            '<div class="map-note">Cyan dots form measured AIS trail points; amber is a 30-minute '
+            "constant-course/speed projection. Red beacons mark anomaly events.</div>",
             unsafe_allow_html=True,
         )
     st.pydeck_chart(
         build_map(
             map_vessels,
             track,
+            forecast,
             anomalies,
+            selected_mmsi=selected_mmsi,
             show_labels=show_labels,
             show_route=show_route and selected_mmsi is not None,
             show_anomalies=show_anomalies,
@@ -380,13 +428,23 @@ with tab_anomalies:
 with tab_route:
     if selected_mmsi is None:
         st.info("Select a vessel above to inspect its route telemetry.")
-    elif track.empty:
-        st.info("No track points were returned for this trail window.")
     else:
-        telemetry = track.copy()
-        telemetry["event_time"] = pd.to_datetime(telemetry["event_time"]).dt.strftime("%H:%M:%S")
-        st.line_chart(telemetry.set_index("event_time")[["sog_knots"]], color="#74e6a3")
-        st.dataframe(telemetry, use_container_width=True, hide_index=True)
+        actual_tab, forecast_tab = st.tabs(["Measured AIS", "Projected route"])
+        with actual_tab:
+            if track.empty:
+                st.info("Only one recent AIS observation is available; wait for another live message to draw a measured trail.")
+            else:
+                telemetry = track.copy()
+                telemetry["event_time"] = pd.to_datetime(telemetry["event_time"]).dt.strftime("%H:%M:%S")
+                st.line_chart(telemetry.set_index("event_time")[["sog_knots"]], color="#74e6a3")
+                st.dataframe(telemetry, use_container_width=True, hide_index=True)
+        with forecast_tab:
+            if forecast.empty:
+                st.info("No projection is available for this vessel.")
+            else:
+                st.caption("Projection uses the latest measured speed and course; it is not a trained ML forecast.")
+                st.line_chart(forecast.set_index("minutes_ahead")[["sog_knots"]], color="#ffc05c")
+                st.dataframe(forecast, use_container_width=True, hide_index=True)
 
 st.divider()
 st.subheader("AquaTrace query assistant")

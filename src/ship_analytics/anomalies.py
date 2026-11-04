@@ -28,6 +28,7 @@ class AnomalyDetector:
 
     INVALID_JUMP_SPEED_KNOTS = 60.0
     REPORTING_GAP_MINUTES = 30
+    MAX_REPORTING_GAP_MINUTES = 12 * 60
     SPEED_THRESHOLDS = {
         "Cargo": 25.0,
         "Tanker": 20.0,
@@ -76,7 +77,9 @@ class AnomalyDetector:
 
         gap_minutes = (current_event.event_time - last_event.event_time).total_seconds() / 60
 
-        if gap_minutes > AnomalyDetector.REPORTING_GAP_MINUTES:
+        # A multi-day jump normally means historical replay was mixed with a
+        # live stream, not that a vessel silently stopped reporting.
+        if AnomalyDetector.REPORTING_GAP_MINUTES < gap_minutes <= AnomalyDetector.MAX_REPORTING_GAP_MINUTES:
             return Anomaly(
                 mmsi=current_event.mmsi,
                 event_time=current_event.event_time,

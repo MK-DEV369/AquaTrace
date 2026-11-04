@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS anomaly (
     severity TEXT NOT NULL,
     explanation TEXT NOT NULL,
     geom geometry(Point, 4326),
-    evidence_json JSONB NOT DEFAULT '{}'::jsonb
+    evidence_json JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE INDEX IF NOT EXISTS anomaly_mmsi_event_time_idx ON anomaly (mmsi, event_time);

@@ -15,6 +15,7 @@ from ship_analytics.llm import LLMProvider
 
 # Map from NL intent/tool name to the approved investigation tools.
 _TOOL_NAME_MAP = {
+    "get_fleet_summary": "get_fleet_summary",
     "get_vessel_snapshot": "get_vessel_snapshot",
     "get_recent_anomalies": "get_recent_anomalies",
     "get_vessel_track": "get_vessel_track",
@@ -239,7 +240,7 @@ class NaturalLanguageProcessor:
     def _generate_answer(self, query: str, rag_context: list[dict], results: list[dict]) -> str:
         """Generate a natural-language answer via the LLM."""
         if not self.llm.is_available():
-            return "LLM provider unavailable; returning tool results only."
+            return self._grounded_fallback_answer(results)
         system = (
             "You are AquaTrace AI, a maritime investigation assistant. "
             "Answer the user's question using only the provided context and tool results. "
@@ -253,7 +254,30 @@ class NaturalLanguageProcessor:
         try:
             return self.llm.chat(system, user)
         except Exception as exc:
-            return f"LLM call failed: {exc}"
+            return self._grounded_fallback_answer(results, prefix="LLM call failed; using grounded tool data.")
+
+    @staticmethod
+    def _grounded_fallback_answer(results: list[dict], prefix: str = "Grounded tool summary (LLM offline).") -> str:
+        """Give the dashboard a useful, non-generative answer when no LLM is running."""
+        for item in results:
+            result = item.get("result", {}) if isinstance(item, dict) else {}
+            if item.get("tool_name") == "get_fleet_summary" and isinstance(result, dict):
+                types = ", ".join(f"{row['vessel_type']}: {row['count']}" for row in result.get("vessel_types", []))
+                sources = ", ".join(f"{row['source']}: {row['vessels']} vessels" for row in result.get("sources", []))
+                anomalies = ", ".join(f"{row['severity']}: {row['count']}" for row in result.get("anomalies", [])) or "none"
+                return (
+                    f"{prefix} Active vessels: {result.get('active_vessels', 0)}; "
+                    f"mean speed: {float(result.get('average_speed_knots') or 0):.1f} kn. "
+                    f"Types: {types or 'unavailable'}. Sources: {sources or 'unavailable'}. "
+                    f"Recent anomalies: {anomalies}."
+                )
+            if item.get("tool_name") == "get_vessel_snapshot" and isinstance(result, dict):
+                return (
+                    f"{prefix} Vessel {result.get('mmsi')} is at {result.get('latitude')}, "
+                    f"{result.get('longitude')}, moving {result.get('sog_knots')} kn on "
+                    f"course {result.get('cog_degrees')}°."
+                )
+        return f"{prefix} No matching fleet evidence was returned; include a nine-digit MMSI or ask for a fleet count."
 
     def _parse_query(self, query, context, user_preferences):
         parsed = {
@@ -294,14 +318,16 @@ class NaturalLanguageProcessor:
             return "general_question"
 
     def _extract_entities(self, query):
+        import re
+
+        mmsis = re.findall(r"\b\d{9}\b", query)
         if self.nlp_model:
             try:
                 doc = self.nlp_model(query)
-                entities = [ent.text for ent in doc.ents]
-                return entities
+                return list(dict.fromkeys(mmsis + [ent.text for ent in doc.ents]))
             except Exception:
-                return []
-        return []
+                return mmsis
+        return mmsis
 
     def _extract_time_range(self, query, context):
         time_range = {"start": None, "end": None}
@@ -410,9 +436,12 @@ class NaturalLanguageProcessor:
             tools.append("compare_vessel_baseline")
         if "incident" in parsed_query["original_query"].lower() or "report" in parsed_query["original_query"].lower():
             tools.append("draft_incident_report")
-        # Default: vessel snapshot.
+        has_mmsi = any(str(entity).isdigit() and len(str(entity)) == 9 for entity in parsed_query.get("entities", []))
+        if intent in {"vessel_count", "event_count", "anomaly_count", "general_count", "general_question"} and not has_mmsi:
+            tools.append("get_fleet_summary")
+        # Default: vessel snapshot when a vessel was explicitly identified.
         if not tools:
-            tools.append("get_vessel_snapshot")
+            tools.append("get_vessel_snapshot" if has_mmsi else "get_fleet_summary")
         # Always include snapshot for context if a vessel is referenced.
         if "get_vessel_snapshot" not in tools and any(c.isdigit() for c in parsed_query["original_query"]):
             tools.insert(0, "get_vessel_snapshot")

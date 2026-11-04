@@ -1,6 +1,7 @@
 """Stream processor job for Phase 1: validate, deduplicate, publish, and persist AIS events."""
 
 import json
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,10 @@ EVENT_SCHEMA = StructType(
 )
 
 
+class KafkaSinkError(RuntimeError):
+    """Raised after a required Kafka output cannot be delivered or dead-lettered."""
+
+
 def _as_utc(value: datetime) -> datetime:
     """Treat Spark's timezone-naive timestamps as UTC."""
     if value.tzinfo is None:
@@ -89,12 +94,64 @@ class AISProcessor:
         )
 
     def _publish(self, topic: str, key: str | None, value: dict[str, Any]) -> None:
-        try:
-            self._producer.produce(topic, key=key, value=json.dumps(value, default=str))
-            self._producer.poll(0)
-            counter("kafka_sink_messages_total", labels={"topic": topic})
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.error("failed to publish to %s: %s", topic, exc)
+        """Publish a required output, retrying before failing the Spark batch."""
+        payload = json.dumps(value, default=str)
+        last_error: Exception | None = None
+        for attempt in range(1, self.settings.kafka_max_retries + 1):
+            delivery_error: list[Exception] = []
+
+            def delivered(error, _message) -> None:
+                if error is not None:
+                    delivery_error.append(error)
+
+            try:
+                self._producer.produce(topic, key=key, value=payload, on_delivery=delivered)
+                pending = self._producer.flush(10)
+                if pending == 0 and not delivery_error:
+                    counter("kafka_sink_messages_total", labels={"topic": topic})
+                    return
+                last_error = KafkaSinkError(
+                    f"Kafka delivery did not complete for topic {topic} (pending={pending})"
+                )
+            except Exception as exc:  # pragma: no cover - broker/network dependent
+                last_error = exc
+
+            counter("kafka_sink_retry_total", labels={"topic": topic})
+            logger.warning("kafka sink retry topic=%s attempt=%d", topic, attempt)
+            time.sleep(min(2 ** (attempt - 1), 8))
+
+        if topic != self.settings.kafka_dlq_topic:
+            self._publish_dlq(topic, key, payload, last_error)
+        counter("kafka_sink_failure_total", labels={"topic": topic})
+        raise KafkaSinkError(f"required Kafka output failed for topic {topic}") from last_error
+
+    def _publish_dlq(
+        self, source_topic: str, key: str | None, payload: str, error: Exception | None
+    ) -> None:
+        """Persist an unrecoverable output failure with enough context to replay it."""
+        envelope = {
+            "source_topic": source_topic,
+            "key": key,
+            "payload": payload,
+            "error_type": type(error).__name__ if error else "UnknownError",
+            "failed_at": datetime.now(UTC).isoformat(),
+        }
+        delivery_error: list[Exception] = []
+
+        def delivered(delivery_failure, _message) -> None:
+            if delivery_failure is not None:
+                delivery_error.append(delivery_failure)
+
+        self._producer.produce(
+            self.settings.kafka_dlq_topic,
+            key=key,
+            value=json.dumps(envelope),
+            on_delivery=delivered,
+        )
+        pending = self._producer.flush(10)
+        if pending or delivery_error:
+            raise KafkaSinkError("dead-letter publish failed")
+        counter("kafka_messages_dlq_total", labels={"topic": source_topic})
 
     def validate_events(self, raw: DataFrame) -> tuple[DataFrame, DataFrame]:
         """Parse and validate AIS events from Kafka."""
@@ -116,6 +173,7 @@ class AISProcessor:
 
     def detect_and_categorize_anomalies(self, events: list[AisEvent]) -> list:
         """Detect anomalies in events and categorize them."""
+        batch_anomalies = []
         for event in events:
             previous_event = self.vessel_states.get(event.mmsi)
             last_known_state = self.vessel_states.get(event.mmsi)
@@ -124,10 +182,11 @@ class AISProcessor:
                 event, previous_event, last_known_state
             )
             self.anomalies.extend(anomalies)
+            batch_anomalies.extend(anomalies)
 
             self.vessel_states[event.mmsi] = event
 
-        return self.anomalies
+        return batch_anomalies
 
     def calculate_window_metrics(self, events: list[AisEvent]) -> list:
         """Calculate tumbling window metrics from events."""
@@ -196,7 +255,6 @@ class AISProcessor:
                         ais_event.vessel_type,
                     ),
                 )
-
                 cursor.execute(
                     """
                     INSERT INTO vessel_latest (
@@ -219,7 +277,6 @@ class AISProcessor:
                         ais_event.vessel_type,
                     ),
                 )
-
                 cursor.execute(
                     """
                     INSERT INTO vessel_track_point (
@@ -238,21 +295,43 @@ class AISProcessor:
                     ),
                 )
 
+    def persist_anomalies(self, anomalies: list) -> None:
+        """Store the current micro-batch's explainable anomalies for API/dashboard reads."""
+        if not anomalies:
+            return
+        with psycopg.connect(self.settings.database_url) as conn, conn.cursor() as cursor:
+            for anomaly in anomalies:
+                cursor.execute(
+                    """
+                    INSERT INTO anomaly (
+                        mmsi, event_time, anomaly_type, severity, explanation, geom, evidence_json
+                    ) VALUES (%s, %s, %s, %s, %s, ST_SetSRID(ST_MakePoint(%s, %s), 4326), %s::jsonb)
+                    """,
+                    (
+                        anomaly.mmsi,
+                        anomaly.event_time,
+                        anomaly.anomaly_type,
+                        anomaly.severity,
+                        anomaly.explanation,
+                        anomaly.geom.x,
+                        anomaly.geom.y,
+                        json.dumps(anomaly.evidence_json),
+                    ),
+                )
+
+
     def process_event_batch(self, batch_df: DataFrame, _: int) -> None:
         """Process a batch of events through the full pipeline."""
         t0 = datetime.now(UTC)
         clean_df, invalid_df = self.validate_events(batch_df)
 
-        # Publish invalid events to ais.invalid sink.
-        try:
-            for row in invalid_df.toLocalIterator():
-                self._publish(
-                    "ais.invalid",
-                    None,
-                    {"event": row.asDict() if hasattr(row, "asDict") else str(row)},
-                )
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.error("invalid sink failed: %s", exc)
+        # Invalid payloads are a business-data sink, distinct from the infrastructure DLQ.
+        for row in invalid_df.toLocalIterator():
+            self._publish(
+                "ais.invalid",
+                None,
+                {"event": row.asDict() if hasattr(row, "asDict") else str(row)},
+            )
 
         events = []
         for row in clean_df.select(*EVENT_SCHEMA.fieldNames()).toLocalIterator():
@@ -272,24 +351,22 @@ class AISProcessor:
             )
             events.append(event)
 
-        self.detect_and_categorize_anomalies(events)
+        batch_anomalies = self.detect_and_categorize_anomalies(events)
         self.calculate_window_metrics(events)
         self.upsert_to_postgis(clean_df, 0)
+        self.persist_anomalies(batch_anomalies)
 
         # Publish clean events to ais.clean sink.
         for event in events:
             self._publish("ais.clean", str(event.mmsi), event.model_dump(mode="json"))
 
-        # Publish detected anomalies to ais.anomaly sink.
-        for anomaly in self.anomalies[-len(events):] if events else []:
-            try:
-                self._publish(
-                    "ais.anomaly",
-                    str(getattr(anomaly, "mmsi", None)),
-                    anomaly.to_dict() if hasattr(anomaly, "to_dict") else {"anomaly": str(anomaly)},
-                )
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.error("anomaly sink failed: %s", exc)
+        # Publish detected anomalies to the canonical ais.anomaly sink.
+        for anomaly in batch_anomalies:
+            self._publish(
+                "ais.anomaly",
+                str(getattr(anomaly, "mmsi", None)),
+                anomaly.to_dict() if hasattr(anomaly, "to_dict") else {"anomaly": str(anomaly)},
+            )
 
         if self._predictors:
             for event in events:
@@ -340,8 +417,10 @@ def main() -> None:
         .option("kafka.bootstrap.servers", settings.kafka_brokers)
         .option("subscribe", "ais.raw")
         .option("startingOffsets", settings.kafka_starting_offset)
-        .load()
     )
+    for option, value in settings.spark_kafka_options().items():
+        raw = raw.option(option, value)
+    raw = raw.load()
 
     query = (
         raw.writeStream

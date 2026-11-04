@@ -18,6 +18,16 @@ def _load_events() -> list[dict]:
         return [json.loads(line) for line in file if line.strip()]
 
 
+def _events_for_run(run_id: str) -> list[dict]:
+    """Make every infrastructure run distinguishable from prior replay data."""
+    events = []
+    for index, event in enumerate(_load_events()):
+        copy = dict(event)
+        copy["event_id"] = f"e2e:{run_id}:{index}"
+        events.append(copy)
+    return events
+
+
 def test_six_events_validated() -> None:
     from ship_analytics.schemas import AisEvent
 
@@ -51,7 +61,8 @@ def test_six_events_kafka_postgres_output_counts() -> None:
 
     settings = get_settings()
     ensure_topics(settings.kafka_brokers)
-    events = _load_events()
+    run_id = uuid.uuid4().hex
+    events = _events_for_run(run_id)
     event_ids = {event["event_id"] for event in events}
     consumer = Consumer(
         {
@@ -62,7 +73,8 @@ def test_six_events_kafka_postgres_output_counts() -> None:
         }
     )
     consumer.subscribe(["ais.clean", "ais.invalid", "ais.anomaly", "ais.prediction"])
-    counts = {topic: 0 for topic in ("ais.clean", "ais.invalid", "ais.anomaly", "ais.prediction")}
+    seen_ids = {topic: set() for topic in ("ais.clean", "ais.invalid", "ais.anomaly", "ais.prediction")}
+    # Join the group before producing so the 'latest' test subscription cannot miss output records.
     consumer.poll(1.0)
     producer = Producer({"bootstrap.servers": settings.kafka_brokers, "client.id": "e2e-six-events"})
     for event in events:
@@ -70,13 +82,13 @@ def test_six_events_kafka_postgres_output_counts() -> None:
     assert producer.flush(15) == 0
     deadline = time.monotonic() + 90
     try:
-        while time.monotonic() < deadline and counts["ais.clean"] < len(events):
+        while time.monotonic() < deadline and len(seen_ids["ais.clean"]) < len(events):
             message = consumer.poll(1.0)
             if message is None or message.error():
                 continue
             payload = json.loads(message.value())
-            if payload.get("event_id") in event_ids or payload.get("mmsi") in {event["mmsi"] for event in events}:
-                counts[message.topic()] += 1
+            if payload.get("event_id") in event_ids:
+                seen_ids[message.topic()].add(payload["event_id"])
     finally:
         consumer.close()
 
@@ -85,11 +97,23 @@ def test_six_events_kafka_postgres_output_counts() -> None:
             "SELECT COUNT(*) FROM ais_event_clean WHERE event_id = ANY(%s)",
             (list(event_ids),),
         )
-        database_count = cursor.fetchone()[0]
+        clean_database_count = cursor.fetchone()[0]
+        cursor.execute(
+            "SELECT COUNT(*) FROM vessel_track_point WHERE event_id = ANY(%s)",
+            (list(event_ids),),
+        )
+        track_database_count = cursor.fetchone()[0]
+        cursor.execute(
+            "SELECT COUNT(*) FROM vessel_latest WHERE mmsi = ANY(%s)",
+            ([event["mmsi"] for event in events],),
+        )
+        latest_database_count = cursor.fetchone()[0]
 
-    assert database_count == len(events)
-    assert counts["ais.clean"] == len(events)
-    assert counts["ais.invalid"] == 0
-    assert counts["ais.anomaly"] >= 0
+    assert clean_database_count == len(events)
+    assert track_database_count == len(events)
+    assert latest_database_count == len(events)
+    assert seen_ids["ais.clean"] == event_ids
+    assert seen_ids["ais.invalid"] == set()
+    assert seen_ids["ais.anomaly"] == set()
     if settings.enable_prediction:
-        assert counts["ais.prediction"] >= len(events)
+        assert len(seen_ids["ais.prediction"]) == len(events)
