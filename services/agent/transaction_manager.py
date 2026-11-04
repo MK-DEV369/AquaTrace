@@ -7,15 +7,16 @@ two-phase commit protocols, and compensation actions for atomic investigations.
 import asyncio
 import hashlib
 import json
+import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set
 from enum import Enum
+from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
-
+from pydantic import BaseModel
 from services.agent.tools import TOOL_REGISTRY, execute_tool
-from services.kafka_integration import kafka_producer
+
+logger = logging.getLogger("transaction_manager")
 
 
 class TransactionState(str, Enum):
@@ -33,14 +34,14 @@ class TransactionAction(BaseModel):
     action_id: str
     action_type: str
     tool_name: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     state: TransactionState = TransactionState.PENDING
     start_time: datetime
-    end_time: Optional[datetime] = None
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-    compensation_action: Optional[Dict[str, Any]] = None
-    checksum: Optional[str] = None
+    end_time: datetime | None = None
+    result: dict[str, Any] | None = None
+    error: str | None = None
+    compensation_action: dict[str, Any] | None = None
+    checksum: str | None = None
 
 
 class CompensationAction(BaseModel):
@@ -48,11 +49,11 @@ class CompensationAction(BaseModel):
     action_id: str
     action_type: str
     inverse_tool: str
-    inverse_parameters: Dict[str, Any]
+    inverse_parameters: dict[str, Any]
     priority: int = 1
     rollback_on_failure: bool = True
     executed: bool = False
-    execution_time: Optional[datetime] = None
+    execution_time: datetime | None = None
 
 
 class DistributedTransaction:
@@ -62,12 +63,12 @@ class DistributedTransaction:
         self.transaction_id = transaction_id
         self.investigation_id = investigation_id
         self.state = TransactionState.PENDING
-        self.actions: List[TransactionAction] = []
-        self.compensation_actions: List[CompensationAction] = []
+        self.actions: list[TransactionAction] = []
+        self.compensation_actions: list[CompensationAction] = []
         self.created_at = datetime.utcnow()
-        self.started_at: Optional[datetime] = None
-        self.completed_at: Optional[datetime] = None
-        self.checksum_history: List[str] = []
+        self.started_at: datetime | None = None
+        self.completed_at: datetime | None = None
+        self.checksum_history: list[str] = []
         
     def add_action(self, action: TransactionAction):
         """Add an action to the transaction."""
@@ -100,7 +101,7 @@ class DistributedTransaction:
         self.checksum = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
         self.checksum_history.append(self.checksum)
     
-    def execute_action(self, action: TransactionAction):
+    async def execute_action(self, action: TransactionAction):
         """Execute a single action within the transaction."""
         action.state = TransactionState.EXECUTING
         action.start_time = datetime.utcnow()
@@ -113,7 +114,7 @@ class DistributedTransaction:
                 )
             
             # Execute the tool with enhanced error handling
-            result = asyncio.run(execute_tool(action.tool_name, action.parameters))
+            result = await execute_tool(action.tool_name, action.parameters)
             
             action.state = TransactionState.COMPLETED
             action.end_time = datetime.utcnow()
@@ -125,7 +126,7 @@ class DistributedTransaction:
             action.error = str(e)
             raise
     
-    def compensate(self):
+    async def compensate(self):
         """Execute compensation actions in reverse order."""
         self.state = TransactionState.COMPENSATING
         
@@ -133,16 +134,16 @@ class DistributedTransaction:
         for compensation in reversed(self.compensation_actions):
             if not compensation.executed:
                 try:
-                    self._execute_compensation(compensation)
+                    await self._execute_compensation(compensation)
                     compensation.executed = True
                     compensation.execution_time = datetime.utcnow()
-                except Exception as e:
+                except Exception:
                     # Log compensation failure but continue with other compensations
-                    print(f"Compensation action {compensation.action_id} failed: {e}")
+                    logger.exception("compensation action failed: %s", compensation.action_id)
         
         self.state = TransactionState.ROLLED_BACK
     
-    def _execute_compensation(self, compensation: CompensationAction):
+    async def _execute_compensation(self, compensation: CompensationAction):
         """Execute a single compensation action."""
         if compensation.inverse_tool not in TOOL_REGISTRY:
             raise HTTPException(
@@ -151,15 +152,15 @@ class DistributedTransaction:
             )
         
         # Execute the inverse action
-        result = asyncio.run(execute_tool(
+        result = await execute_tool(
             compensation.inverse_tool, 
             compensation.inverse_parameters
-        ))
+        )
         
         # Log compensation for audit trail
         await self._log_compensation_event(compensation, result)
     
-    async def _log_compensation_event(self, compensation: CompensationAction, result: Dict[str, Any]):
+    async def _log_compensation_event(self, compensation: CompensationAction, result: dict[str, Any]):
         """Log compensation event for audit trail."""
         event = {
             'transaction_id': self.transaction_id,
@@ -174,7 +175,7 @@ class DistributedTransaction:
         # Store in audit log
         await self._store_audit_event('compensation', event)
     
-    async def _store_audit_event(self, event_type: str, event: Dict[str, Any]):
+    async def _store_audit_event(self, event_type: str, event: dict[str, Any]):
         """Store audit event for compliance and debugging."""
         # Implementation would store in audit database or logging system
         pass
@@ -184,8 +185,8 @@ class TransactionCoordinator:
     """Coordinates distributed transactions for agentic AI investigations."""
     
     def __init__(self):
-        self.active_transactions: Dict[str, DistributedTransaction] = {}
-        self.transaction_history: List[Dict[str, Any]] = []
+        self.active_transactions: dict[str, DistributedTransaction] = {}
+        self.transaction_history: list[dict[str, Any]] = []
         self.compensation_queue: asyncio.Queue = asyncio.Queue()
         
     def create_transaction(self, investigation_id: str) -> str:
@@ -205,8 +206,8 @@ class TransactionCoordinator:
         transaction_id: str, 
         action_type: str,
         tool_name: str,
-        parameters: Dict[str, Any],
-        compensation_action: Optional[Dict[str, Any]] = None
+        parameters: dict[str, Any],
+        compensation_action: dict[str, Any] | None = None
     ) -> str:
         """Add an action to an existing transaction."""
         if transaction_id not in self.active_transactions:
@@ -241,7 +242,7 @@ class TransactionCoordinator:
         
         return action_id
     
-    async def execute_transaction(self, transaction_id: str) -> Dict[str, Any]:
+    async def execute_transaction(self, transaction_id: str) -> dict[str, Any]:
         """Execute a distributed transaction atomically."""
         if transaction_id not in self.active_transactions:
             raise HTTPException(
@@ -257,10 +258,8 @@ class TransactionCoordinator:
             # Execute all actions in sequence
             for action in transaction.actions:
                 try:
-                    self.execute_action(transaction_id, action.action_id)
-                except Exception as e:
-                    # If any action fails, initiate compensation
-                    await self.compensate_transaction(transaction_id)
+                    await self.execute_action(transaction_id, action.action_id)
+                except Exception:
                     raise
             
             # All actions completed successfully
@@ -281,7 +280,7 @@ class TransactionCoordinator:
                 'checksum': transaction.checksum
             }
             
-        except Exception as e:
+        except Exception:
             # Transaction failed, initiate compensation
             await self.compensate_transaction(transaction_id)
             raise
@@ -297,7 +296,7 @@ class TransactionCoordinator:
         transaction.state = TransactionState.FAILED
         
         # Execute compensation
-        transaction.compensate()
+        await transaction.compensate()
         
         # Log transaction failure for audit
         await self._log_transaction_failure(transaction_id, transaction)
@@ -305,7 +304,7 @@ class TransactionCoordinator:
         # Remove from active transactions after compensation
         del self.active_transactions[transaction_id]
     
-    def execute_action(self, transaction_id: str, action_id: str):
+    async def execute_action(self, transaction_id: str, action_id: str):
         """Execute a specific action within a transaction."""
         if transaction_id not in self.active_transactions:
             raise HTTPException(
@@ -324,7 +323,7 @@ class TransactionCoordinator:
             )
         
         # Execute the action
-        transaction.execute_action(action)
+        await transaction.execute_action(action)
     
     async def _complete_transaction(self, transaction_id: str):
         """Mark transaction as completed and log for audit."""
@@ -369,7 +368,7 @@ class TransactionCoordinator:
         self.transaction_history.append(failure_event)
         await self._send_to_audit_log('transaction_failed', failure_event)
     
-    async def _send_to_audit_log(self, event_type: str, event: Dict[str, Any]):
+    async def _send_to_audit_log(self, event_type: str, event: dict[str, Any]):
         """Send event to audit logging system."""
         # Implementation would send to audit log service
         pass
@@ -387,23 +386,23 @@ class TransactionCoordinator:
                 ]
                 
                 for txn_id in stale_transactions:
-                    print(f"Cleaning up stale transaction {txn_id}")
+                    logger.info("cleaning up stale transaction %s", txn_id)
                     # Remove stale transactions
                     del self.active_transactions[txn_id]
                 
                 # Check for transactions that have failed but not been cleaned up
                 for txn_id, transaction in self.active_transactions.items():
                     if transaction.state in [TransactionState.FAILED, TransactionState.ROLLED_BACK]:
-                        print(f"Cleaning up completed/failed transaction {txn_id}")
+                        logger.info("cleaning up completed/failed transaction %s", txn_id)
                         del self.active_transactions[txn_id]
                 
                 await asyncio.sleep(300)  # Check every 5 minutes
                 
-            except Exception as e:
-                print(f"Error in transaction monitoring: {e}")
+            except Exception:
+                logger.exception("transaction monitoring failed")
                 await asyncio.sleep(60)  # Wait 1 minute before retry
     
-    def get_transaction_status(self, transaction_id: str) -> Dict[str, Any]:
+    def get_transaction_status(self, transaction_id: str) -> dict[str, Any]:
         """Get status of a transaction."""
         if transaction_id not in self.active_transactions:
             raise HTTPException(
@@ -445,7 +444,7 @@ class TransactionCoordinator:
             ]
         }
     
-    def list_transactions(self) -> List[Dict[str, Any]]:
+    def list_transactions(self) -> list[dict[str, Any]]:
         """List all active transactions."""
         return [
             {

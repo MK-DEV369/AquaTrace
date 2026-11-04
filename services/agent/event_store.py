@@ -4,17 +4,14 @@ This module provides immutable event logging with checksum verification,
 replay capabilities, and audit trail for all investigation activities.
 """
 
-import asyncio
 import hashlib
 import json
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
-
-from ship_analytics.schemas import AisEvent
 
 
 class EventStoreType(str, Enum):
@@ -31,16 +28,16 @@ class EventRecord(BaseModel):
     event_type: str
     investigation_id: str
     timestamp: datetime
-    data: Dict[str, Any]
+    data: dict[str, Any]
     checksum: str
     version: int = 1
     sequence_number: int
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
     @classmethod
     def create(cls, event_id: str, event_type: str, investigation_id: str, 
-               data: Dict[str, Any], sequence_number: int, metadata: Optional[Dict[str, Any]] = None) -> 'EventRecord':
+               data: dict[str, Any], sequence_number: int, metadata: dict[str, Any] | None = None) -> 'EventRecord':
         """Create a new event record with checksum."""
         # Create base event data
         event_data = {
@@ -69,10 +66,10 @@ class EventStore:
     
     def __init__(self, store_type: EventStoreType = EventStoreType.POSTGRESQL):
         self.store_type = store_type
-        self.events: Dict[str, List[EventRecord]] = {}  # investigation_id -> events
-        self.sequence_numbers: Dict[str, int] = {}  # investigation_id -> next sequence
-        self.checksum_index: Dict[str, Dict[str, str]] = {}  # event_id -> checksum
-        self.committed_events: Set[str] = set()  # event_ids that have been committed
+        self.events: dict[str, list[EventRecord]] = {}  # investigation_id -> events
+        self.sequence_numbers: dict[str, int] = {}  # investigation_id -> next sequence
+        self.checksum_index: dict[str, dict[str, str]] = {}  # event_id -> checksum
+        self.committed_events: set[str] = set()  # event_ids that have been committed
         
     def _ensure_investigation_exists(self, investigation_id: str):
         """Ensure investigation has an event store initialized."""
@@ -85,8 +82,8 @@ class EventStore:
         self, 
         investigation_id: str, 
         event_type: str, 
-        data: Dict[str, Any],
-        metadata: Optional[Dict[str, Any]] = None
+        data: dict[str, Any],
+        metadata: dict[str, Any] | None = None
     ) -> EventRecord:
         """Append an event to the store with checksum verification."""
         self._ensure_investigation_exists(investigation_id)
@@ -128,9 +125,9 @@ class EventStore:
         self, 
         investigation_id: str, 
         from_sequence: int = 0,
-        to_sequence: Optional[int] = None,
-        event_types: Optional[List[str]] = None
-    ) -> List[EventRecord]:
+        to_sequence: int | None = None,
+        event_types: list[str] | None = None
+    ) -> list[EventRecord]:
         """Retrieve events for an investigation with filtering."""
         self._ensure_investigation_exists(investigation_id)
         
@@ -147,7 +144,7 @@ class EventStore:
         
         return filtered_events
     
-    async def get_event(self, investigation_id: str, event_id: str) -> Optional[EventRecord]:
+    async def get_event(self, investigation_id: str, event_id: str) -> EventRecord | None:
         """Retrieve a specific event by ID."""
         self._ensure_investigation_exists(investigation_id)
         
@@ -168,7 +165,7 @@ class EventStore:
         from_sequence: int = 0,
         to_event: str = None,
         to_sequence: int = None
-    ) -> List[EventRecord]:
+    ) -> list[EventRecord]:
         """Replay events with filtering for specific ranges."""
         self._ensure_investigation_exists(investigation_id)
         
@@ -219,12 +216,10 @@ class EventStore:
         return calculated_checksum == event.checksum
     
     async def _persist_event(self, event: EventRecord):
-        """Persist event to backing store."""
-        # Implementation would persist to PostgreSQL, Redis, or other storage
-        # For now, this is a placeholder
-        pass
+        """Finalize the in-memory append used by the memory backend."""
+        self.committed_events.add(event.event_id)
     
-    async def commit_event_batch(self, events: List[EventRecord]):
+    async def commit_event_batch(self, events: list[EventRecord]):
         """Commit multiple events atomically."""
         try:
             # Validate all events before committing
@@ -243,7 +238,7 @@ class EventStore:
             for event in events:
                 self.committed_events.add(event.event_id)
                 
-        except Exception as e:
+        except Exception:
             # If any event fails, rollback all
             for event in events:
                 if event.event_id in self.committed_events:
@@ -252,11 +247,15 @@ class EventStore:
             raise
     
     async def _undo_persistence(self, event: EventRecord):
-        """Undo persistence of an event."""
-        # Implementation would remove from backing store
-        pass
+        """Remove an event from the memory backend during rollback."""
+        self.committed_events.discard(event.event_id)
+        events = self.events.get(event.investigation_id, [])
+        self.events[event.investigation_id] = [
+            stored for stored in events if stored.event_id != event.event_id
+        ]
+        self.checksum_index.get(event.investigation_id, {}).pop(event.event_id, None)
     
-    async def get_event_history(self, investigation_id: str) -> Dict[str, Any]:
+    async def get_event_history(self, investigation_id: str) -> dict[str, Any]:
         """Get complete event history for an investigation."""
         self._ensure_investigation_exists(investigation_id)
         
@@ -280,7 +279,7 @@ class EventStore:
         """Check if an event has been committed."""
         return event_id in self.committed_events
     
-    def get_checksum_index(self, investigation_id: str) -> Dict[str, str]:
+    def get_checksum_index(self, investigation_id: str) -> dict[str, str]:
         """Get checksum index for an investigation."""
         self._ensure_investigation_exists(investigation_id)
         return self.checksum_index[investigation_id].copy()
@@ -290,10 +289,10 @@ class EventStoreManager:
     """Manages multiple event stores with routing and consistency."""
     
     def __init__(self):
-        self.event_stores: Dict[str, EventStore] = {}
+        self.event_stores: dict[str, EventStore] = {}
         self.default_store_type = EventStoreType.POSTGRESQL
         
-    def get_store(self, investigation_id: str, store_type: Optional[EventStoreType] = None) -> EventStore:
+    def get_store(self, investigation_id: str, store_type: EventStoreType | None = None) -> EventStore:
         """Get or create an event store for an investigation."""
         store_type = store_type or self.default_store_type
         store_key = f"{investigation_id}_{store_type.value}"
@@ -307,8 +306,8 @@ class EventStoreManager:
         self,
         investigation_id: str,
         event_type: str,
-        data: Dict[str, Any],
-        metadata: Optional[Dict[str, Any]] = None
+        data: dict[str, Any],
+        metadata: dict[str, Any] | None = None
     ) -> EventRecord:
         """Append event with consistency guarantees across stores."""
         # Use primary store for the event
@@ -324,17 +323,20 @@ class EventStoreManager:
     
     async def _replicate_to_secondary_stores(self, investigation_id: str, event: EventRecord):
         """Replicate event to secondary stores for high availability."""
-        # Implementation would replicate to secondary stores
-        # For now, this is a placeholder
-        pass
+        for key, store in self.event_stores.items():
+            if key != investigation_id and store is not self.get_store(investigation_id):
+                store._ensure_investigation_exists(investigation_id)
+                if not any(item.event_id == event.event_id for item in store.events[investigation_id]):
+                    store.events[investigation_id].append(event)
+                    store.checksum_index[investigation_id][event.event_id] = event.checksum
     
     async def get_consistent_events(
         self,
         investigation_id: str,
         from_sequence: int = 0,
-        to_sequence: Optional[int] = None,
-        event_types: Optional[List[str]] = None
-    ) -> List[EventRecord]:
+        to_sequence: int | None = None,
+        event_types: list[str] | None = None
+    ) -> list[EventRecord]:
         """Get events with consistency guarantees."""
         primary_store = self.get_store(investigation_id)
         return await primary_store.get_events(from_sequence, to_sequence, event_types)

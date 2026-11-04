@@ -16,6 +16,7 @@ class FeatureStore:
     def __init__(self):
         self.settings = get_settings()
         self.engine = create_engine(self.settings.database_url)
+        self._spatial_features: dict[int, dict[str, float]] = {}
 
     def extract_temporal_features(
         self,
@@ -176,12 +177,12 @@ class FeatureStore:
         self._store_spatial_features(vessel_mmsi, features)
 
     def _store_spatial_features(self, vessel_mmsi: int, features: dict[str, float]) -> None:
-        """Store spatial features to PostGIS."""
-        with self.engine.connect() as conn:
-            # This would store vessel position and features
-            conn.execute(
-                text("")
-            )  # TODO: Implement spatial feature storage
+        """Retain the latest spatial feature vector for downstream inference."""
+        self._spatial_features[vessel_mmsi] = dict(features)
+
+    def get_spatial_features(self, vessel_mmsi: int) -> dict[str, float]:
+        """Return the latest materialized spatial feature vector."""
+        return dict(self._spatial_features.get(vessel_mmsi, {}))
 
     def get_features_for_training(
         self,

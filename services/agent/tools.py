@@ -5,18 +5,17 @@ for the AI investigation agent. All functions validate inputs and return
 structured evidence for agent reasoning.
 """
 
-import asyncio
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from ship_analytics.schemas import AisEvent
+# Import existing database connection utilities
+from services.api.db import connection
+
 from ship_analytics.anomalies import AnomalyDetector
 
-# Import existing database connection utilities
-from services.api.main import connection
 
 # Validation models for tool inputs
 class VesselQuery(BaseModel):
@@ -40,7 +39,7 @@ class SpatialSearch(BaseModel):
     as_of: datetime
 
 # Investigation tool implementations
-async def get_vessel_snapshot(mmsi: int) -> Dict[str, Any]:
+async def get_vessel_snapshot(mmsi: int) -> dict[str, Any]:
     """Retrieve the latest stored position, speed, course and timestamp.
     
     Args:
@@ -100,7 +99,7 @@ async def get_vessel_snapshot(mmsi: int) -> Dict[str, Any]:
             status_code=500,
             detail=f"Database error retrieving vessel snapshot: {str(e)}"
         )
-async def get_recent_anomalies(mmsi: int, time_range: timedelta = timedelta(hours=24)) -> List[Dict[str, Any]]:
+async def get_recent_anomalies(mmsi: int, time_range: timedelta = timedelta(hours=24)) -> list[dict[str, Any]]:
     """Retrieve recorded anomalies and their rule-based reasons.
     
     Args:
@@ -154,7 +153,7 @@ async def get_recent_anomalies(mmsi: int, time_range: timedelta = timedelta(hour
             status_code=500,
             detail=f"Database error retrieving anomalies: {str(e)}"
         )
-async def get_vessel_track(mmsi: int, start: datetime, end: datetime) -> List[Dict[str, Any]]:
+async def get_vessel_track(mmsi: int, start: datetime, end: datetime) -> list[dict[str, Any]]:
     """Retrieve ordered historical positions for a specific vessel.
     
     Args:
@@ -213,7 +212,7 @@ async def get_vessel_track(mmsi: int, start: datetime, end: datetime) -> List[Di
             status_code=500,
             detail=f"Database error retrieving vessel track: {str(e)}"
         )
-async def compare_vessel_baseline(mmsi: int, time_range: timedelta = timedelta(days=30)) -> Dict[str, Any]:
+async def compare_vessel_baseline(mmsi: int, time_range: timedelta = timedelta(days=30)) -> dict[str, Any]:
     """Compare observations with a baseline calculated from adequate historical data.
     
     Args:
@@ -334,7 +333,7 @@ async def compare_vessel_baseline(mmsi: int, time_range: timedelta = timedelta(d
             status_code=500,
             detail=f"Database error calculating baseline comparison: {str(e)}"
         )
-async def find_nearby_vessels(mmsi: int, radius_km: float = 10.0, as_of: datetime = None) -> List[Dict[str, Any]]:
+async def find_nearby_vessels(mmsi: int, radius_km: float = 10.0, as_of: datetime = None) -> list[dict[str, Any]]:
     """Use PostGIS to find nearby vessels at a relevant time.
     
     Args:
@@ -422,7 +421,7 @@ async def find_nearby_vessels(mmsi: int, radius_km: float = 10.0, as_of: datetim
             status_code=500,
             detail=f"Database error finding nearby vessels: {str(e)}"
         )
-async def draft_incident_report(mmsi: int, anomaly_id: Optional[int] = None) -> Dict[str, Any]:
+async def draft_incident_report(mmsi: int, anomaly_id: int | None = None) -> dict[str, Any]:
     """Assemble a structured draft from retrieved evidence.
     
     Args:
@@ -682,7 +681,7 @@ async def get_tool(name: str):
         )
     return TOOL_REGISTRY[name]
 
-async def list_tools() -> List[Dict[str, Any]]:
+async def list_tools() -> list[dict[str, Any]]:
     """List all available investigation tools with metadata.
     
     Returns:
@@ -693,7 +692,7 @@ async def list_tools() -> List[Dict[str, Any]]:
         "metadata": metadata
     } for name, metadata in TOOL_METADATA.items()]
 
-async def execute_tool(tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+async def execute_tool(tool_name: str, parameters: dict[str, Any]) -> dict[str, Any]:
     """Execute a tool with given parameters.
     
     Args:
@@ -718,7 +717,6 @@ async def execute_tool(tool_name: str, parameters: Dict[str, Any]) -> Dict[str, 
         converted_params["mmsi"] = int(parameters.get("mmsi"))
         if "time_range" in parameters:
             # Parse time_range string if provided
-            from dateutil.parser import parse
             time_range_hours = float(parameters.get("time_range", "24"))
             converted_params["time_range"] = timedelta(hours=time_range_hours)
     

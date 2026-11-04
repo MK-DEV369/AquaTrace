@@ -12,6 +12,11 @@ from ship_analytics.feature_store import FeatureStore
 from ship_analytics.mlmodels import MLModels
 from ship_analytics.natural_language import NaturalLanguageProcessor
 from ship_analytics.schemas import AisEvent
+from ship_analytics.trajectory_models import (
+    TrajectoryPredictor,
+    build_trajectories_from_events,
+    compare_trajectory_models,
+)
 
 # Create router for inclusion in main app
 router = APIRouter(prefix="", tags=["phase2"])
@@ -130,8 +135,6 @@ def ml_anomaly_detection(
 
     # Prepare features for ML
     if not training_data.empty:
-        # This would use actual features in production
-        # For demo, we'll simulate with basic features
         feature_columns = [
             "sog_knots", "cog_degrees", "latitude", "longitude",
             "hour_of_day", "day_of_week", "is_underway",
@@ -152,8 +155,16 @@ def ml_anomaly_detection(
             "sample_size": 0,
         }
 
-    # Generate ML anomalies (simulated for demo)
-    anomalies = _generate_ml_anomalies_sample(threshold, limit, mmsi)
+    anomalies = []
+    if not training_data.empty:
+        events = [
+            AisEvent.model_validate(row)
+            for row in training_data.to_dict(orient="records")
+            if "event_id" in row
+        ]
+        anomalies = _ml_models.detect_anomalies_ml(events, feature_columns)[:limit]
+        if mmsi is not None:
+            anomalies = [item for item in anomalies if item["mmsi"] == mmsi]
 
     return {
         "model_metrics": ml_metrics,
@@ -312,6 +323,83 @@ def register_natural_language_tool(
     """
     result = _nl_processor.register_tool(tool_name, description, tool_schema, validation_rules)
     return result
+
+
+@router.post("/ml/trajectory/predict")
+def trajectory_predict(
+    events: list[dict],
+    model_type: str = "lstm",
+    horizon_minutes: int = 60,
+) -> dict[str, object]:
+    """Predict vessel trajectory at 30/60 minute horizons using LSTM or Transformer."""
+    if not events:
+        raise HTTPException(status_code=400, detail="events required")
+    predictor = TrajectoryPredictor(model_type=model_type, horizon_minutes=horizon_minutes)
+    recent = [
+        {
+            "latitude": e["latitude"],
+            "longitude": e["longitude"],
+            "sog_knots": e.get("sog_knots") or 0.0,
+            "cog_degrees": e.get("cog_degrees") or 0.0,
+        }
+        for e in events
+    ]
+    result = predictor.predict(recent)
+    return result.to_dict()
+
+
+@router.post("/ml/trajectory/train")
+def trajectory_train(
+    events: list[dict],
+    model_type: str = "lstm",
+    horizon_minutes: int = 60,
+    epochs: int = 5,
+) -> dict[str, object]:
+    """Train an LSTM or Transformer trajectory model on supplied events."""
+    if not events:
+        raise HTTPException(status_code=400, detail="events required")
+    predictor = TrajectoryPredictor(model_type=model_type, horizon_minutes=horizon_minutes)
+    trajectories = build_trajectories_from_events(events)
+    result = predictor.train(trajectories, epochs=epochs)
+    return {"model_type": model_type, **result}
+
+
+@router.post("/ml/trajectory/compare")
+def trajectory_compare(events: list[dict], horizon_minutes: int = 60) -> dict[str, object]:
+    """Compare LSTM vs Transformer predictions on the same input."""
+    if not events:
+        raise HTTPException(status_code=400, detail="events required")
+    recent = [
+        {
+            "latitude": e["latitude"],
+            "longitude": e["longitude"],
+            "sog_knots": e.get("sog_knots") or 0.0,
+            "cog_degrees": e.get("cog_degrees") or 0.0,
+        }
+        for e in events
+    ]
+    out = {}
+    for mt in ("lstm", "transformer"):
+        predictor = TrajectoryPredictor(model_type=mt, horizon_minutes=horizon_minutes)
+        out[mt] = predictor.predict(recent).to_dict()
+    return out
+
+
+@router.post("/ml/trajectory/evaluate")
+def trajectory_evaluate(
+    events: list[dict],
+    horizon_minutes: int = 60,
+    epochs: int = 1,
+) -> dict[str, object]:
+    """Train and evaluate both trajectory models on identical vessel holdouts."""
+    if not events:
+        raise HTTPException(status_code=400, detail="events required")
+    trajectories = build_trajectories_from_events(events)
+    return compare_trajectory_models(
+        trajectories,
+        horizon_minutes=horizon_minutes,
+        epochs=epochs,
+    )
 
 
 @router.websocket("/ws/advanced-updates")

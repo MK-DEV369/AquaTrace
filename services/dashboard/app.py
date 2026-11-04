@@ -387,3 +387,32 @@ with tab_route:
         telemetry["event_time"] = pd.to_datetime(telemetry["event_time"]).dt.strftime("%H:%M:%S")
         st.line_chart(telemetry.set_index("event_time")[["sog_knots"]], color="#74e6a3")
         st.dataframe(telemetry, use_container_width=True, hide_index=True)
+
+st.divider()
+st.subheader("AquaTrace query assistant")
+st.caption("Ask about the live fleet; answers are grounded in registered investigation tools.")
+query = st.chat_input("e.g. Which vessels had anomalies in the last hour?")
+if query:
+    headers = {"Authorization": f"Bearer {API_AUTH_TOKEN}"} if API_AUTH_TOKEN else {}
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/agents/query",
+            json={"query": query},
+            headers=headers,
+            timeout=120,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        replies = [
+            item["reply"]["payload"]
+            for item in payload.get("results", [])
+            if item.get("reply", {}).get("type") == "query_result"
+        ]
+        if replies:
+            result = replies[0]
+            st.write(result.get("answer") or result)
+            st.caption(f"Correlation ID: {payload.get('correlation_id', 'unknown')}")
+        else:
+            st.warning("The query agent returned no answer.")
+    except requests.RequestException as exc:
+        st.error(f"Query assistant unavailable: {exc}")

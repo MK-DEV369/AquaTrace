@@ -5,14 +5,24 @@ and communication between clients and the Ship Analytics system.
 """
 
 from services.websocket.connection_manager import EnhancedConnectionManager
+from services.websocket.handler import WebSocketHandler, get_websocket_handler
 from services.websocket.schemas import (
-    WebSocketMessage, UpdateMessage, QueryMessage, AnalysisMessage,
-    SubscriptionMessage, CommandMessage, ResponseMessage, ErrorMessage,
-    HeartbeatMessage, AnalyticsUpdate, RouteDiscoveryUpdate,
-    MLModelUpdate, SystemStatusMessage, AuthenticationMessage,
+    AnalysisMessage,
+    AnalyticsUpdate,
+    AuthenticationMessage,
+    CommandMessage,
+    ErrorMessage,
+    HeartbeatMessage,
+    MLModelUpdate,
+    QueryMessage,
+    ResponseMessage,
+    RouteDiscoveryUpdate,
+    SubscriptionMessage,
+    SystemStatusMessage,
+    UpdateMessage,
+    WebSocketMessage,
     WebSocketMessageType,
 )
-from services.websocket.handler import WebSocketHandler, get_websocket_handler
 
 __all__ = [
     "EnhancedConnectionManager",

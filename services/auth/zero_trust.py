@@ -4,20 +4,17 @@ This module implements zero-trust architecture, comprehensive validation,
 and advanced security measures for the agentic AI system.
 """
 
-import asyncio
 import hashlib
 import json
 import secrets
+import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set
 from enum import Enum
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
-from cryptography.hazmat.primitives import serialization
+from typing import Any
 
+from cryptography.fernet import Fernet
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class SecurityLevel(str, Enum):
@@ -35,9 +32,9 @@ class ValidationRule(BaseModel):
     rule_id: str = Field(min_length=8, max_length=50)
     rule_type: str = Field(min_length=5, max_length=50)
     description: str
-    pattern: Optional[str] = None
-    schema: Optional[Dict[str, Any]] = None
-    validation_function: Optional[str] = None
+    pattern: str | None = None
+    schema: dict[str, Any] | None = None
+    validation_function: str | None = None
     severity: str = Field(default="medium")
     active: bool = True
 
@@ -49,7 +46,7 @@ class ValidationResult(BaseModel):
     rule_id: str
     field_name: str
     value: Any
-    error_message: Optional[str] = None
+    error_message: str | None = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -58,27 +55,30 @@ class SecurityAuditLog(BaseModel):
     
     log_id: str = Field(min_length=8, max_length=50)
     event_type: str
-    user_id: Optional[str] = None
-    session_id: Optional[str] = None
-    ip_address: Optional[str] = None
-    user_agent: Optional[str] = None
+    user_id: str | None = None
+    session_id: str | None = None
+    ip_address: str | None = None
+    user_agent: str | None = None
     action: str
     resource: str
     outcome: str
-    details: Dict[str, Any]
+    details: dict[str, Any]
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     checksum: str
     
     @classmethod
     def create(cls, **data) -> 'SecurityAuditLog':
         """Create audit log entry with checksum."""
+        data.setdefault("timestamp", datetime.utcnow())
+        for field in ("user_id", "session_id", "ip_address", "user_agent"):
+            data.setdefault(field, None)
         # Remove log_id from data for checksum calculation
         log_data = data.copy()
         if 'log_id' in log_data:
             del log_data['log_id']
         
         # Generate checksum
-        checksum_data = json.dumps(log_data, sort_keys=True).encode()
+        checksum_data = json.dumps(log_data, sort_keys=True, default=str).encode()
         checksum = hashlib.sha256(checksum_data).hexdigest()
         
         # Add log_id and checksum
@@ -94,7 +94,7 @@ class SecurityAuditLog(BaseModel):
         log_data = self.dict(exclude={'checksum', 'log_id'})
         
         # Calculate checksum
-        checksum_data = json.dumps(log_data, sort_keys=True).encode()
+        checksum_data = json.dumps(log_data, sort_keys=True, default=str).encode()
         calculated_checksum = hashlib.sha256(checksum_data).hexdigest()
         
         return calculated_checksum == self.checksum
@@ -105,19 +105,19 @@ class ZeroTrustManager:
     
     def __init__(self, jwt_secret: str):
         self.jwt_secret = jwt_secret
-        self.service_registry: Dict[str, Dict[str, Any]] = {}
-        self.identity_store: Dict[str, Dict[str, Any]] = {}
-        self.policy_engine: Dict[str, Any] = {}
+        self.service_registry: dict[str, dict[str, Any]] = {}
+        self.identity_store: dict[str, dict[str, Any]] = {}
+        self.policy_engine: dict[str, Any] = {}
         self.encrypted_data_key: bytes = Fernet.generate_key()
         self.fernet = Fernet(self.encrypted_data_key)
         
-    def register_service(self, service_id: str, service_info: Dict[str, Any]):
+    def register_service(self, service_id: str, service_info: dict[str, Any]):
         """Register a service in the zero-trust network."""
         service_info['registered_at'] = datetime.utcnow().isoformat()
         service_info['last_heartbeat'] = datetime.utcnow().isoformat()
         self.service_registry[service_id] = service_info
     
-    def authenticate_service(self, service_id: str, credentials: Dict[str, str]) -> str:
+    def authenticate_service(self, service_id: str, credentials: dict[str, str]) -> str:
         """Authenticate a service and return JWT token."""
         if service_id not in self.service_registry:
             raise HTTPException(
@@ -181,7 +181,7 @@ class ZeroTrustManager:
         
         return True
     
-    def encrypt_data(self, data: Dict[str, Any], recipient_service: str) -> str:
+    def encrypt_data(self, data: dict[str, Any], recipient_service: str) -> str:
         """Encrypt data for secure transmission between services."""
         try:
             data_json = json.dumps(data)
@@ -193,7 +193,7 @@ class ZeroTrustManager:
                 detail=f"Data encryption failed: {str(e)}"
             )
     
-    def decrypt_data(self, encrypted_data: str) -> Dict[str, Any]:
+    def decrypt_data(self, encrypted_data: str) -> dict[str, Any]:
         """Decrypt data from secure transmission."""
         try:
             decrypted_data = self.fernet.decrypt(encrypted_data.encode())
@@ -204,7 +204,7 @@ class ZeroTrustManager:
                 detail=f"Data decryption failed: {str(e)}"
             )
     
-    def validate_request(self, request: Request) -> Dict[str, Any]:
+    def validate_request(self, request: Request) -> dict[str, Any]:
         """Validate incoming request using zero-trust principles."""
         validation_result = {
             'valid': True,
@@ -230,7 +230,7 @@ class ZeroTrustManager:
         
         return validation_result
     
-    def _validate_request_headers(self, request: Request) -> Dict[str, Any]:
+    def _validate_request_headers(self, request: Request) -> dict[str, Any]:
         """Validate request headers."""
         headers = {}
         
@@ -252,7 +252,7 @@ class ZeroTrustManager:
             'headers': headers
         }
     
-    def _validate_request_body(self, request: Request) -> Dict[str, Any]:
+    def _validate_request_body(self, request: Request) -> dict[str, Any]:
         """Validate request body against schema."""
         try:
             body = request.json()
@@ -276,7 +276,7 @@ class ZeroTrustManager:
                 'error': str(e)
             }
     
-    def _validate_request_metadata(self, request: Request) -> Dict[str, Any]:
+    def _validate_request_metadata(self, request: Request) -> dict[str, Any]:
         """Validate request metadata and security context."""
         metadata = {
             'source_ip': request.client.host if request.client else None,
@@ -307,27 +307,27 @@ class ZeroTrustManager:
         # Implementation would validate header value based on key
         return True
     
-    def _validate_credentials(self, service: Dict[str, Any], credentials: Dict[str, str]) -> bool:
+    def _validate_credentials(self, service: dict[str, Any], credentials: dict[str, str]) -> bool:
         """Validate service credentials."""
         # Implementation would validate credentials based on service configuration
         return True
     
-    def _check_permission(self, permissions: List[str], resource: str, action: str) -> bool:
+    def _check_permission(self, permissions: list[str], resource: str, action: str) -> bool:
         """Check if service has permission for resource and action."""
         # Implementation would check permissions against policy
         return True
     
-    def _apply_security_policies(self, identity: Dict[str, Any], resource: str, action: str) -> bool:
+    def _apply_security_policies(self, identity: dict[str, Any], resource: str, action: str) -> bool:
         """Apply security policies to service request."""
         # Implementation would apply security policies
         return True
     
-    def _get_request_schema(self, request: Request) -> Optional[Dict[str, Any]]:
+    def _get_request_schema(self, request: Request) -> dict[str, Any] | None:
         """Get schema for request body validation."""
         # Implementation would return schema based on endpoint
         return None
     
-    def _validate_body_against_schema(self, body: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]:
+    def _validate_body_against_schema(self, body: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
         """Validate body against schema."""
         # Implementation would validate body against schema
         return {'valid': True, 'errors': []}
@@ -342,7 +342,7 @@ class ZeroTrustManager:
         # Implementation would validate user agent
         return True
     
-    def _generate_jwt_token(self, data: Dict[str, Any]) -> str:
+    def _generate_jwt_token(self, data: dict[str, Any]) -> str:
         """Generate JWT token."""
         # In a real implementation, this would use JWT library
         return "fake_jwt_token"
@@ -352,9 +352,9 @@ class ValidationSchemaManager:
     """Manages validation schemas and rules for data integrity."""
     
     def __init__(self):
-        self.validation_rules: Dict[str, ValidationRule] = {}
-        self.schemas: Dict[str, Dict[str, Any]] = {}
-        self.rule_versions: Dict[str, int] = {}
+        self.validation_rules: dict[str, ValidationRule] = {}
+        self.schemas: dict[str, dict[str, Any]] = {}
+        self.rule_versions: dict[str, int] = {}
         
     def register_validation_rule(self, rule: ValidationRule):
         """Register a validation rule."""
@@ -363,11 +363,13 @@ class ValidationSchemaManager:
     
     def validate_data(
         self,
-        data: Dict[str, Any],
-        schema_name: Optional[str] = None,
-        rules: Optional[List[str]] = None
-    ) -> List[ValidationResult]:
+        data: dict[str, Any] | str,
+        schema_name: str | None | dict[str, Any] = None,
+        rules: list[str] | None = None
+    ) -> list[ValidationResult]:
         """Validate data against schema and rules."""
+        if isinstance(data, str) and isinstance(schema_name, dict):
+            data, schema_name = schema_name, data
         results = []
         
         # Validate against schema if provided
@@ -392,14 +394,25 @@ class ValidationSchemaManager:
         
         return results
     
-    def _validate_field(self, field_name: str, value: Any, schema: Dict[str, Any]) -> ValidationResult:
+    def _validate_field(self, field_name: str, value: Any, schema: dict[str, Any]) -> ValidationResult:
         """Validate a field against schema."""
-        # Implementation would validate field based on schema
+        is_valid = True
+        error_message = None
+        if schema.get("type") == "number" and not isinstance(value, (int, float)):
+            is_valid = False
+            error_message = "value must be numeric"
+        if is_valid and schema.get("minimum") is not None and value < schema["minimum"]:
+            is_valid = False
+            error_message = f"value must be >= {schema['minimum']}"
+        if is_valid and schema.get("maximum") is not None and value > schema["maximum"]:
+            is_valid = False
+            error_message = f"value must be <= {schema['maximum']}"
         return ValidationResult(
-            is_valid=True,
+            is_valid=is_valid,
             rule_id=f"schema_{field_name}",
             field_name=field_name,
-            value=value
+            value=value,
+            error_message=error_message,
         )
     
     def _validate_with_rule(self, field_name: str, value: Any, rule: ValidationRule) -> ValidationResult:
@@ -417,11 +430,11 @@ class ValidationSchemaManager:
         # Implementation would determine if rule applies to field
         return True
     
-    def register_schema(self, schema_name: str, schema: Dict[str, Any]):
+    def register_schema(self, schema_name: str, schema: dict[str, Any]):
         """Register a validation schema."""
         self.schemas[schema_name] = schema
     
-    def get_schema(self, schema_name: str) -> Optional[Dict[str, Any]]:
+    def get_schema(self, schema_name: str) -> dict[str, Any] | None:
         """Get validation schema by name."""
         return self.schemas.get(schema_name)
 
@@ -431,19 +444,19 @@ class SecurityAuditor:
     
     def __init__(self, zero_trust_manager: ZeroTrustManager):
         self.zero_trust_manager = zero_trust_manager
-        self.audit_logs: List[SecurityAuditLog] = []
+        self.audit_logs: list[SecurityAuditLog] = []
         
     async def log_security_event(
         self,
         event_type: str,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
         action: str = "",
         resource: str = "",
         outcome: str = "",
-        details: Optional[Dict[str, Any]] = None
+        details: dict[str, Any] | None = None
     ) -> SecurityAuditLog:
         """Log a security event to audit trail."""
         audit_log = SecurityAuditLog.create(
@@ -471,11 +484,11 @@ class SecurityAuditor:
     
     def get_security_events(
         self,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        event_type: Optional[str] = None,
-        user_id: Optional[str] = None
-    ) -> List[SecurityAuditLog]:
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        event_type: str | None = None,
+        user_id: str | None = None
+    ) -> list[SecurityAuditLog]:
         """Get security events with filtering."""
         events = self.audit_logs
         
@@ -493,7 +506,7 @@ class SecurityAuditor:
         
         return events
     
-    def generate_security_report(self) -> Dict[str, Any]:
+    def generate_security_report(self) -> dict[str, Any]:
         """Generate comprehensive security report."""
         total_events = len(self.audit_logs)
         
@@ -508,7 +521,7 @@ class SecurityAuditor:
             if log.user_id:
                 user_activity[log.user_id] = user_activity.get(log.user_id, 0) + 1
         
-        checksum_valid = await self.verify_audit_log_integrity()
+        checksum_valid = all(log.verify_checksum() for log in self.audit_logs)
         
         return {
             'total_events': total_events,

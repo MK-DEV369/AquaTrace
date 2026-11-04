@@ -5,24 +5,17 @@ plan investigations, select tools, query data, and produce evidence-based
 explanations for maritime vessel behavior analysis.
 """
 
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from services.agent.investigation_agent import (
-    InvestigationRequest,
-    MaritimeInvestigationAgent,
-    InvestigationSession
-)
+from services.agent.investigation_agent import InvestigationRequest, MaritimeInvestigationAgent
 from services.kafka_integration import (
-    KafkaInvestigationConsumer,
-    KafkaInvestigationProducer,
-    investigation_agent,
+    get_kafka_status,
     setup_kafka_integration,
     stop_kafka_integration,
-    get_kafka_status
 )
 
 # Create router for agent endpoints
@@ -34,8 +27,8 @@ investigation_agent = MaritimeInvestigationAgent()
 # WebSocket connection manager for real-time investigation updates
 class AgentWebSocketManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
-        self.investigation_sessions: Dict[str, Dict[str, Any]] = {}
+        self.active_connections: list[WebSocket] = []
+        self.investigation_sessions: dict[str, dict[str, Any]] = {}
     
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -44,14 +37,14 @@ class AgentWebSocketManager:
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
     
-    async def send_to_all(self, message: Dict[str, Any]):
+    async def send_to_all(self, message: dict[str, Any]):
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
             except Exception:
                 pass
     
-    async def send_to_session(self, session_id: str, message: Dict[str, Any]):
+    async def send_to_session(self, session_id: str, message: dict[str, Any]):
         if session_id in self.investigation_sessions:
             for connection in self.active_connections:
                 # Send update to all connected clients
@@ -86,9 +79,9 @@ class InvestigationExecuteResponse(BaseModel):
     session_id: str
     status: str
     investigation_summary: str
-    evidence_summary: Dict[str, Any]
-    recommendations: List[str]
-    uncertainties: List[str]
+    evidence_summary: dict[str, Any]
+    recommendations: list[str]
+    uncertainties: list[str]
     confidence_score: float
     completion_timestamp: datetime
 
@@ -100,18 +93,18 @@ class InvestigationCancelResponse(BaseModel):
 class AgentToolInfo(BaseModel):
     name: str
     description: str
-    parameters: List[Dict[str, str]]
+    parameters: list[dict[str, str]]
     returns: str
     safety_level: str
     category: str
 
 class ToolListResponse(BaseModel):
-    tools: List[AgentToolInfo]
+    tools: list[AgentToolInfo]
 
 # API endpoint implementations
 
 @router.post("/investigate/start", response_model=InvestigationStartResponse)
-async def start_investigation(request: InvestigationRequest) -> Dict[str, Any]:
+async def start_investigation(request: InvestigationRequest) -> dict[str, Any]:
     """Start a new maritime investigation.
     
     Args:
@@ -154,7 +147,7 @@ async def start_investigation(request: InvestigationRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Failed to start investigation: {str(e)}")
 
 @router.post("/investigate/{session_id}/execute", response_model=InvestigationExecuteResponse)
-async def execute_investigation(session_id: str, request: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+async def execute_investigation(session_id: str, request: dict[str, Any] | None = None) -> dict[str, Any]:
     """Execute an investigation session.
     
     Args:
@@ -214,7 +207,7 @@ async def execute_investigation(session_id: str, request: Optional[Dict[str, Any
         raise HTTPException(status_code=500, detail=f"Failed to execute investigation: {str(e)}")
 
 @router.get("/investigate/{session_id}/status", response_model=InvestigationStatusResponse)
-async def get_investigation_status(session_id: str) -> Dict[str, Any]:
+async def get_investigation_status(session_id: str) -> dict[str, Any]:
     """Get the status of an investigation session.
     
     Args:
@@ -231,7 +224,7 @@ async def get_investigation_status(session_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found: {str(e)}")
 
 @router.post("/investigate/{session_id}/cancel", response_model=InvestigationCancelResponse)
-async def cancel_investigation(session_id: str) -> Dict[str, Any]:
+async def cancel_investigation(session_id: str) -> dict[str, Any]:
     """Cancel an investigation session.
     
     Args:
@@ -261,8 +254,8 @@ async def cancel_investigation(session_id: str) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Failed to cancel session {session_id}: {str(e)}")
 
-@router.get("/investigate/{session_id}/report", response_model=Dict[str, Any])
-async def get_investigation_report(session_id: str) -> Dict[str, Any]:
+@router.get("/investigate/{session_id}/report", response_model=dict[str, Any])
+async def get_investigation_report(session_id: str) -> dict[str, Any]:
     """Get detailed investigation report.
     
     Args:
@@ -279,7 +272,7 @@ async def get_investigation_report(session_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Report for session {session_id} not found: {str(e)}")
 
 @router.get("/tools", response_model=ToolListResponse)
-async def list_approved_tools() -> Dict[str, Any]:
+async def list_approved_tools() -> dict[str, Any]:
     """List all approved investigation tools with metadata.
     
     Returns:
@@ -296,7 +289,7 @@ async def list_approved_tools() -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Failed to list tools: {str(e)}")
 
 @router.post("/execute-tool")
-async def execute_single_tool(request: Dict[str, Any]) -> Dict[str, Any]:
+async def execute_single_tool(request: dict[str, Any]) -> dict[str, Any]:
     """Execute a single tool (for testing and direct tool execution).
     
     Args:
@@ -328,7 +321,7 @@ async def execute_single_tool(request: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Tool execution failed: {str(e)}")
 
 @router.websocket("/investigate")
-async def agent_websocket_endpoint(websocket: WebSocket, session_id: Optional[str] = None):
+async def agent_websocket_endpoint(websocket: WebSocket, session_id: str | None = None):
     """WebSocket endpoint for real-time investigation updates.
     
     Args:
@@ -439,7 +432,7 @@ async def agent_websocket_endpoint(websocket: WebSocket, session_id: Optional[st
             # Clean up session
             if session_id in investigation_agent.active_sessions:
                 await investigation_agent.cancel_investigation(session_id)
-    except Exception as e:
+    except Exception:
         websocket_manager.disconnect(websocket)
         # Clean up any associated sessions
         for session_id, session_data in list(websocket_manager.investigation_sessions.items()):
@@ -448,7 +441,7 @@ async def agent_websocket_endpoint(websocket: WebSocket, session_id: Optional[st
                 await investigation_agent.cancel_investigation(session_id)
 
 @router.get("/kafka/status")
-async def get_kafka_integration_status() -> Dict[str, Any]:
+async def get_kafka_integration_status() -> dict[str, Any]:
     """Get Kafka integration status.
     
     Returns:
@@ -470,7 +463,7 @@ async def get_kafka_integration_status() -> Dict[str, Any]:
 
 
 @router.post("/kafka/start")
-async def start_kafka_integration() -> Dict[str, Any]:
+async def start_kafka_integration() -> dict[str, Any]:
     """Start Kafka integration for agentic AI.
     
     Returns:
@@ -489,7 +482,7 @@ async def start_kafka_integration() -> Dict[str, Any]:
 
 
 @router.post("/kafka/stop")
-async def stop_kafka_integration_endpoint() -> Dict[str, Any]:
+async def stop_kafka_integration_endpoint() -> dict[str, Any]:
     """Stop Kafka integration.
     
     Returns:
@@ -499,14 +492,15 @@ async def stop_kafka_integration_endpoint() -> Dict[str, Any]:
         await stop_kafka_integration()
         return {
             "status": "stopped",
-            "timestamp": datetime.utcnow().isoformat(),n            "message": "Kafka integration stopped successfully"
+            "timestamp": datetime.utcnow().isoformat(),
+            "message": "Kafka integration stopped successfully",
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to stop Kafka integration: {str(e)}")
 
 
 @router.get("/kafka/consumer-sessions")
-async def get_kafka_consumer_sessions() -> Dict[str, Any]:
+async def get_kafka_consumer_sessions() -> dict[str, Any]:
     """Get Kafka consumer investigation sessions.
     
     Returns:
@@ -526,7 +520,7 @@ async def get_kafka_consumer_sessions() -> Dict[str, Any]:
 
 
 @router.post("/kafka/publish-investigation")
-async def publish_investigation_result(request: Dict[str, Any]) -> Dict[str, Any]:
+async def publish_investigation_result(request: dict[str, Any]) -> dict[str, Any]:
     """Publish investigation result to Kafka.
     
     Args:
@@ -557,7 +551,7 @@ async def publish_investigation_result(request: Dict[str, Any]) -> Dict[str, Any
 
 
 @router.post("/kafka/publish-alert")
-async def publish_investigation_alert(request: Dict[str, Any]) -> Dict[str, Any]:
+async def publish_investigation_alert(request: dict[str, Any]) -> dict[str, Any]:
     """Publish investigation alert to Kafka.
     
     Args:

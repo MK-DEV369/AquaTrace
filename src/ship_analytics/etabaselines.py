@@ -385,7 +385,30 @@ class ETABaselines:
             },
         }
 
-        # TODO: Implement proper evaluation logic
-        # This would compare predictions against actual positions
+        for event in test_events:
+            key = f"{event.mmsi}_{event.event_time}"
+            for name, result_map in (
+                ("simple_baseline", simple_baseline_results),
+                ("trajectory_baseline", trajectory_baseline_results),
+            ):
+                prediction = result_map.get(key)
+                if not prediction:
+                    continue
+                prediction_list = prediction.get("predictions", [])
+                if not prediction_list:
+                    continue
+                errors = [
+                    self._haversine_distance(
+                        event.latitude,
+                        event.longitude,
+                        item["predicted_latitude"],
+                        item["predicted_longitude"],
+                    )
+                    for item in prediction_list
+                ]
+                evaluation_results[name]["mae_nm"] = float(np.mean(errors))
+                evaluation_results[name]["median_absolute_error_nm"] = float(np.median(errors))
+                evaluation_results[name]["p95_geodesic_error_nm"] = float(np.percentile(errors, 95))
+                evaluation_results[name]["samples_evaluated"] += len(errors)
 
         return evaluation_results

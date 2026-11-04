@@ -5,22 +5,19 @@ select tools, query data, correlate evidence, and produce explanations
 grounded in results.
 """
 
-import asyncio
-import json
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import HTTPException
 from pydantic import BaseModel, Field
-
-from services.agent.tools import execute_tool, get_tool, list_tools, TOOL_METADATA
+from services.agent.tools import TOOL_METADATA, execute_tool
 
 
 class InvestigationRequest(BaseModel):
     """Request model for agent investigations."""
     question: str = Field(..., description="Natural language investigation question")
-    context: Optional[Dict[str, Any]] = Field(None, description="Additional context for investigation")
-    user_id: Optional[str] = Field(None, description="User identifier for tracking")
+    context: dict[str, Any] | None = Field(None, description="Additional context for investigation")
+    user_id: str | None = Field(None, description="User identifier for tracking")
     max_tools: int = Field(5, description="Maximum number of tools to use", ge=1, le=10)
     reasoning_depth: str = Field("standard", description="Reasoning depth: basic, standard, thorough")
 
@@ -31,19 +28,22 @@ class InvestigationSession(BaseModel):
     question: str
     start_time: datetime
     status: str = "in_progress"  # in_progress, completed, cancelled
-    tool_calls: List[Dict[str, Any]] = []
-    evidence_collected: List[Dict[str, Any]] = []
-    reasoning_steps: List[Dict[str, Any]] = []
-    final_report: Optional[Dict[str, Any]] = None
-    errors: List[str] = []
-    user_preferences: Optional[Dict[str, Any]] = None
+    tool_calls: list[dict[str, Any]] = []
+    evidence_collected: list[dict[str, Any]] = []
+    reasoning_steps: list[dict[str, Any]] = []
+    final_report: dict[str, Any] | None = None
+    errors: list[str] = []
+    user_preferences: dict[str, Any] | None = None
+    mmsi: int | None = None
+    max_tools: int = 5
+    reasoning_depth: str = "standard"
 
 
 class MaritimeInvestigationAgent:
     """Agent for maritime vessel investigations with tool planning and execution."""
     
     def __init__(self):
-        self.active_sessions: Dict[str, InvestigationSession] = {}
+        self.active_sessions: dict[str, InvestigationSession] = {}
         self.tool_metadata = TOOL_METADATA
         
     async def start_investigation(self, request: InvestigationRequest) -> str:
@@ -61,7 +61,9 @@ class MaritimeInvestigationAgent:
             session_id=session_id,
             question=request.question,
             start_time=datetime.utcnow(),
-            user_preferences=request.context or {}
+            user_preferences=request.context or {},
+            max_tools=request.max_tools,
+            reasoning_depth=request.reasoning_depth,
         )
         
         self.active_sessions[session_id] = session
@@ -77,7 +79,7 @@ class MaritimeInvestigationAgent:
         
         return session_id
     
-    async def execute_investigation(self, session_id: str) -> Dict[str, Any]:
+    async def execute_investigation(self, session_id: str) -> dict[str, Any]:
         """Execute investigation with intelligent tool selection.
         
         Args:
@@ -170,7 +172,7 @@ class MaritimeInvestigationAgent:
             }
         })
     
-    async def _plan_tool_sequence(self, session: InvestigationSession) -> List[Dict[str, Any]]:
+    async def _plan_tool_sequence(self, session: InvestigationSession) -> list[dict[str, Any]]:
         """Plan the sequence of tool calls based on investigation requirements."""
         
         # Analyze session requirements
@@ -250,7 +252,7 @@ class MaritimeInvestigationAgent:
         
         return planned_tools[:session.max_tools]
     
-    async def _execute_tool_sequence(self, session: InvestigationSession, tool_sequence: List[Dict[str, Any]]):
+    async def _execute_tool_sequence(self, session: InvestigationSession, tool_sequence: list[dict[str, Any]]):
         """Execute the planned sequence of tools."""
         
         for tool_plan in tool_sequence:
@@ -342,7 +344,7 @@ class MaritimeInvestigationAgent:
             "key_findings": self._extract_key_findings(synthesis)
         })
     
-    def _build_temporal_analysis(self, session: InvestigationSession) -> Dict[str, Any]:
+    def _build_temporal_analysis(self, session: InvestigationSession) -> dict[str, Any]:
         """Build temporal analysis from time-series evidence."""
         
         track_points = []
@@ -368,7 +370,7 @@ class MaritimeInvestigationAgent:
             }
         }
     
-    def _build_spatial_analysis(self, session: InvestigationSession) -> Dict[str, Any]:
+    def _build_spatial_analysis(self, session: InvestigationSession) -> dict[str, Any]:
         """Build spatial analysis from geographic evidence."""
         
         spatial_evidence = []
@@ -384,7 +386,7 @@ class MaritimeInvestigationAgent:
             "traffic_patterns": self._analyze_traffic_patterns(session)
         }
     
-    def _build_behavioral_analysis(self, session: InvestigationSession) -> Dict[str, Any]:
+    def _build_behavioral_analysis(self, session: InvestigationSession) -> dict[str, Any]:
         """Build behavioral analysis from comparative evidence."""
         
         baseline_evidence = []
@@ -398,7 +400,7 @@ class MaritimeInvestigationAgent:
             "behavior_patterns": self._extract_behavior_patterns(session)
         }
     
-    def _build_anomaly_analysis(self, session: InvestigationSession) -> Dict[str, Any]:
+    def _build_anomaly_analysis(self, session: InvestigationSession) -> dict[str, Any]:
         """Build anomaly analysis from anomaly-specific evidence."""
         
         anomaly_evidence = []
@@ -412,7 +414,7 @@ class MaritimeInvestigationAgent:
             "severity_assessment": self._assess_anomaly_severity(session)
         }
     
-    def _identify_contextual_factors(self, session: InvestigationSession) -> Dict[str, Any]:
+    def _identify_contextual_factors(self, session: InvestigationSession) -> dict[str, Any]:
         """Identify relevant contextual factors."""
         
         question_lower = session.question.lower()
@@ -454,7 +456,7 @@ class MaritimeInvestigationAgent:
         
         return "; ".join(summary_parts)
     
-    def _generate_evidence_summary(self, session: InvestigationSession) -> Dict[str, Any]:
+    def _generate_evidence_summary(self, session: InvestigationSession) -> dict[str, Any]:
         """Generate summary of collected evidence."""
         
         evidence_by_tool = {}
@@ -475,7 +477,7 @@ class MaritimeInvestigationAgent:
             }
         }
     
-    def _generate_recommendations(self, session: InvestigationSession) -> List[str]:
+    def _generate_recommendations(self, session: InvestigationSession) -> list[str]:
         """Generate actionable recommendations based on investigation."""
         
         recommendations = []
@@ -498,7 +500,7 @@ class MaritimeInvestigationAgent:
         
         return recommendations
     
-    def _identify_uncertainties(self, session: InvestigationSession) -> List[str]:
+    def _identify_uncertainties(self, session: InvestigationSession) -> list[str]:
         """Identify uncertainties and limitations in investigation."""
         
         uncertainties = []
@@ -538,7 +540,7 @@ class MaritimeInvestigationAgent:
     
     # Helper methods
     
-    def _extract_timeframe(self, question: str) -> Optional[str]:
+    def _extract_timeframe(self, question: str) -> str | None:
         """Extract timeframe from investigation question."""
         question_lower = question.lower()
         
@@ -553,7 +555,7 @@ class MaritimeInvestigationAgent:
         
         return None
     
-    def _extract_anomaly_type(self, question: str) -> Optional[str]:
+    def _extract_anomaly_type(self, question: str) -> str | None:
         """Extract anomaly type from investigation question."""
         question_lower = question.lower()
         
@@ -565,7 +567,7 @@ class MaritimeInvestigationAgent:
         
         return None
     
-    def _assess_evidence_quality(self, tool_name: str, evidence: Dict[str, Any]) -> float:
+    def _assess_evidence_quality(self, tool_name: str, evidence: dict[str, Any]) -> float:
         """Assess quality of evidence from tool execution."""
         
         if not evidence:
@@ -598,7 +600,7 @@ class MaritimeInvestigationAgent:
         
         return min(1.0, quality_score)
     
-    def _analyze_proximity(self, session: InvestigationSession) -> Dict[str, Any]:
+    def _analyze_proximity(self, session: InvestigationSession) -> dict[str, Any]:
         """Analyze proximity-based evidence."""
         
         proximity_data = []
@@ -612,7 +614,7 @@ class MaritimeInvestigationAgent:
             "potential_conflicts": [e for e in proximity_data if e.get("distance_km", 0) < 1.0]
         }
     
-    def _analyze_traffic_patterns(self, session: InvestigationSession) -> Dict[str, Any]:
+    def _analyze_traffic_patterns(self, session: InvestigationSession) -> dict[str, Any]:
         """Analyze traffic patterns from collected evidence."""
         
         return {
@@ -621,7 +623,7 @@ class MaritimeInvestigationAgent:
             "traffic_density": "low"
         }
     
-    def _analyze_deviations(self, session: InvestigationSession) -> Dict[str, Any]:
+    def _analyze_deviations(self, session: InvestigationSession) -> dict[str, Any]:
         """Analyze behavioral deviations from baseline."""
         
         return {
@@ -630,7 +632,7 @@ class MaritimeInvestigationAgent:
             "overall_deviation_score": 0.0
         }
     
-    def _extract_behavior_patterns(self, session: InvestigationSession) -> Dict[str, Any]:
+    def _extract_behavior_patterns(self, session: InvestigationSession) -> dict[str, Any]:
         """Extract behavior patterns from evidence."""
         
         return {
@@ -639,7 +641,7 @@ class MaritimeInvestigationAgent:
             "trend_indicators": []
         }
     
-    def _correlate_anomalies(self, session: InvestigationSession) -> Dict[str, Any]:
+    def _correlate_anomalies(self, session: InvestigationSession) -> dict[str, Any]:
         """Correlate multiple anomalies for deeper analysis."""
         
         return {
@@ -648,7 +650,7 @@ class MaritimeInvestigationAgent:
             "related_events": []
         }
     
-    def _assess_anomaly_severity(self, session: InvestigationSession) -> Dict[str, Any]:
+    def _assess_anomaly_severity(self, session: InvestigationSession) -> dict[str, Any]:
         """Assess severity of detected anomalies."""
         
         return {
@@ -685,7 +687,7 @@ class MaritimeInvestigationAgent:
         
         return "low"
     
-    def _extract_key_findings(self, synthesis: Dict[str, Any]) -> List[str]:
+    def _extract_key_findings(self, synthesis: dict[str, Any]) -> list[str]:
         """Extract key findings from evidence synthesis."""
         
         key_findings = []
@@ -699,7 +701,7 @@ class MaritimeInvestigationAgent:
         
         return key_findings
     
-    def _extract_temporal_key_findings(self, temporal_analysis: Dict[str, Any]) -> List[str]:
+    def _extract_temporal_key_findings(self, temporal_analysis: dict[str, Any]) -> list[str]:
         """Extract key findings from temporal analysis."""
         
         findings = []
@@ -716,7 +718,7 @@ class MaritimeInvestigationAgent:
         
         return findings
     
-    def _extract_spatial_key_findings(self, spatial_analysis: Dict[str, Any]) -> List[str]:
+    def _extract_spatial_key_findings(self, spatial_analysis: dict[str, Any]) -> list[str]:
         """Extract key findings from spatial analysis."""
         
         findings = []
@@ -730,7 +732,7 @@ class MaritimeInvestigationAgent:
 
     # Session management methods
     
-    async def get_session_status(self, session_id: str) -> Dict[str, Any]:
+    async def get_session_status(self, session_id: str) -> dict[str, Any]:
         """Get status of an investigation session."""
         
         if session_id not in self.active_sessions:
@@ -749,7 +751,7 @@ class MaritimeInvestigationAgent:
             "reasoning_steps_count": len(session.reasoning_steps)
         }
     
-    async def cancel_investigation(self, session_id: str) -> Dict[str, Any]:
+    async def cancel_investigation(self, session_id: str) -> dict[str, Any]:
         """Cancel an investigation session."""
         
         if session_id not in self.active_sessions:
@@ -764,7 +766,7 @@ class MaritimeInvestigationAgent:
             "message": "Investigation session cancelled successfully"
         }
     
-    async def get_session_report(self, session_id: str) -> Dict[str, Any]:
+    async def get_session_report(self, session_id: str) -> dict[str, Any]:
         """Get detailed report for an investigation session."""
         
         if session_id not in self.active_sessions:

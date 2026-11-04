@@ -6,13 +6,13 @@ management to ensure complete isolation between investigation processes.
 
 import asyncio
 import time
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set
-from enum import Enum
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 
 class ResourceType(str, Enum):
@@ -53,10 +53,10 @@ class ResourceUsage:
     resource_id: str
     resource_type: ResourceType
     state: ResourceState = ResourceState.AVAILABLE
-    acquired_at: Optional[datetime] = None
-    timeout_at: Optional[datetime] = None
-    owner_id: Optional[str] = None
-    metadata: Dict[str, Any] = None
+    acquired_at: datetime | None = None
+    timeout_at: datetime | None = None
+    owner_id: str | None = None
+    metadata: dict[str, Any] = None
 
 
 class CircuitBreakerState(str, Enum):
@@ -83,10 +83,10 @@ class CircuitBreaker:
         self.config = config
         self.state = CircuitBreakerState.CLOSED
         self.failure_count = 0
-        self.last_failure_time: Optional[datetime] = None
+        self.last_failure_time: datetime | None = None
         self.success_count = 0
         self.total_requests = 0
-        self.opened_at: Optional[datetime] = None
+        self.opened_at: datetime | None = None
         
     def record_success(self):
         """Record a successful operation."""
@@ -129,7 +129,7 @@ class CircuitBreaker:
         
         return self.state == CircuitBreakerState.HALF_OPEN
     
-    def get_health_status(self) -> Dict[str, Any]:
+    def get_health_status(self) -> dict[str, Any]:
         """Get circuit breaker health status."""
         if self.total_requests == 0:
             return {
@@ -160,11 +160,11 @@ class ResourceManager:
     """Manages resource isolation and lifecycle."""
     
     def __init__(self):
-        self.active_resources: Dict[str, ResourceUsage] = {}
-        self.resource_quotas: Dict[ResourceType, ResourceQuota] = {}
-        self.circuit_breakers: Dict[str, CircuitBreaker] = {}
-        self.resource_timeouts: Dict[str, timedelta] = {}
-        self.sandboxes: Dict[str, Dict[str, Any]] = {}
+        self.active_resources: dict[str, ResourceUsage] = {}
+        self.resource_quotas: dict[ResourceType, ResourceQuota] = {}
+        self.circuit_breakers: dict[str, CircuitBreaker] = {}
+        self.resource_timeouts: dict[str, timedelta] = {}
+        self.sandboxes: dict[str, dict[str, Any]] = {}
         
         # Initialize default quotas
         self._initialize_default_quotas()
@@ -182,7 +182,7 @@ class ResourceManager:
             ResourceType.COMPUTATION: ResourceQuota(limit=15)
         }
     
-    def add_circuit_breaker(self, name: str, config: Optional[CircuitBreakerConfig] = None):
+    def add_circuit_breaker(self, name: str, config: CircuitBreakerConfig | None = None):
         """Add a circuit breaker for a resource."""
         if config is None:
             config = CircuitBreakerConfig()
@@ -191,13 +191,14 @@ class ResourceManager:
     
     async def acquire_resource(
         self,
-        resource_type: ResourceType,
+        resource_type: ResourceType | str,
         owner_id: str,
-        resource_id: Optional[str] = None,
-        timeout: Optional[timedelta] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        resource_id: str | None = None,
+        timeout: timedelta | None = None,
+        metadata: dict[str, Any] | None = None
     ) -> str:
         """Acquire a resource with circuit breaker protection."""
+        resource_type = ResourceType(resource_type)
         resource_id = resource_id or f"{resource_type.value}_{owner_id}_{int(time.time())}"
         
         # Check if resource type has circuit breaker
@@ -309,7 +310,7 @@ class ResourceManager:
         
         return False
     
-    def get_resource_status(self, resource_id: str) -> Dict[str, Any]:
+    def get_resource_status(self, resource_id: str) -> dict[str, Any]:
         """Get detailed resource status."""
         if resource_id not in self.active_resources:
             raise HTTPException(
@@ -331,7 +332,7 @@ class ResourceManager:
                 if resource.timeout_at else None
         }
     
-    def get_resource_health(self) -> Dict[str, Any]:
+    def get_resource_health(self) -> dict[str, Any]:
         """Get overall resource health status."""
         healthy_resources = sum(
             1 for resource in self.active_resources.values()
@@ -370,7 +371,7 @@ class ResourceManager:
             }
         }
     
-    async def create_sandbox(self, sandbox_id: str, configuration: Dict[str, Any]) -> str:
+    async def create_sandbox(self, sandbox_id: str, configuration: dict[str, Any]) -> str:
         """Create a sandbox environment for isolated execution."""
         # Generate sandbox ID if not provided
         if not sandbox_id:
@@ -393,9 +394,9 @@ class ResourceManager:
         self,
         sandbox_id: str,
         tool_name: str,
-        parameters: Dict[str, Any],
+        parameters: dict[str, Any],
         timeout: timedelta = timedelta(minutes=5)
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Execute tool in isolated sandbox."""
         if sandbox_id not in self.sandboxes:
             raise HTTPException(
@@ -451,20 +452,4 @@ class ResourceManager:
                 status_code=500,
                 detail=f"Sandbox execution failed: {str(e)}"
             )
-
-
-class ResourceManager:
-    """Global resource manager instance."""
-    
-    def __init__(self):
-        self._instance = None
-        
-    def get_instance(self) -> ResourceManager:
-        """Get singleton instance."""
-        if self._instance is None:
-            self._instance = ResourceManager()
-        return self._instance
-
-
-# Global resource manager instance
-resource_manager = ResourceManager().get_instance()
+resource_manager = ResourceManager()

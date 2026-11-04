@@ -6,6 +6,15 @@ The AquaTrace AI Maritime Investigation Agent is a comprehensive agentic AI syst
 
 ## Implementation Status
 
+> **Current delivery note:** The original investigation-agent phases below describe
+> the historical baseline. The AquaTrace streaming implementation now also includes
+> a shared six-agent registry, LSTM/Transformer trajectory models, real Ollama-backed
+> RAG queries (default model `qwen2.5:3b`), Kafka clean/invalid/anomaly/prediction
+> sinks, and the `/agents`, `/agents/trace`, and `/agents/query` observability surface.
+> Set `SHIP_JWT_SECRET` to a non-default secret of at least 32 characters before
+> starting the API. Prediction sink processing is enabled with
+> `SHIP_ENABLE_PREDICTION=true` after trained model artifacts are available.
+
 ### ✅ Phase 1: Foundation - Investigation Tools API (COMPLETED)
 - **6 approved investigation tools** with comprehensive input validation
 - **WebSocket infrastructure** for real-time updates
@@ -735,3 +744,221 @@ The AquaTrace AI Maritime Investigation Agent is a complete, production-ready im
 The implementation is ready for Phase 2 deployment and will help maritime operators understand vessel behavior, investigate anomalies, and make data-driven decisions with evidence-based conclusions.
 
 **Status: Phase 1-4 COMPLETE - Ready for Production Deployment** 🚀
+
+## Presentation Visualization and Container Rebuild
+
+This section describes how to demonstrate the multi-agent orchestration and
+Kafka/Spark streaming pipeline after rebuilding the containers. The most
+effective presentation uses the AquaTrace dashboard, the FastAPI OpenAPI
+interface, and a Kafka topic viewer side by side.
+
+### 1. Start AquaTrace
+
+From the repository root, start the complete local stack:
+
+```powershell
+docker compose up -d
+docker compose ps
+```
+
+Wait until PostgreSQL and Kafka report healthy, then inspect the Spark
+processor while it starts:
+
+```powershell
+docker compose logs -f spark
+```
+
+Open these interfaces in a browser:
+
+| Interface | URL | Purpose |
+|---|---|---|
+| AquaTrace dashboard | http://localhost:8501 | Live vessel metrics, anomalies, routes, predictions, and query assistant |
+| FastAPI documentation | http://localhost:8000/docs | Execute and demonstrate API operations |
+| FastAPI health | http://localhost:8000/health | Confirm API availability |
+
+The API requires the token configured by `SHIP_API_TOKEN` (the local Compose
+default is `dev-api-token-change-me`).
+
+### 2. Visualize the Agent Registry and Orchestration
+
+The registry contains ingestion, tracking, anomaly, route analytics,
+prediction, and query/RAG specialists. The orchestrator can run independent
+tasks concurrently and inject completed dependency results into downstream
+tasks.
+
+List registered agents:
+
+```powershell
+Invoke-RestMethod `
+  -Uri http://localhost:8000/agents `
+  -Headers @{ Authorization = "Bearer dev-api-token-change-me" }
+```
+
+View recent orchestration traces:
+
+```powershell
+Invoke-RestMethod `
+  -Uri http://localhost:8000/agents/trace `
+  -Headers @{ Authorization = "Bearer dev-api-token-change-me" }
+```
+
+Submit a dependency-aware task graph. Replace the example event payload with
+valid AIS events when demonstrating ingestion:
+
+```powershell
+$body = @{
+  tasks = @(
+    @{
+      task_id = "ingest"
+      requirement = "ingest_events"
+      payload = @{ events = @() }
+    },
+    @{
+      task_id = "anomaly"
+      requirement = "detect_anomalies"
+      depends_on = @("ingest")
+      payload = @{}
+    }
+  )
+} | ConvertTo-Json -Depth 10
+
+Invoke-RestMethod `
+  -Uri http://localhost:8000/agents/tasks `
+  -Method Post `
+  -Headers @{ Authorization = "Bearer dev-api-token-change-me" } `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+Use the response and `/agents/trace` to show task status, dependency order,
+agent assignment, correlation IDs, results, and failures. The
+`/agents/tasks` endpoint is the clearest live demonstration of the
+orchestrator delegating work to specialist agents.
+
+### 3. Visualize Kafka Topics
+
+The streaming path is:
+
+```text
+AIS producer -> ais.raw -> Spark Structured Streaming
+            -> ais.clean / ais.invalid / ais.anomaly / ais.prediction
+            -> PostgreSQL/PostGIS and dashboard
+```
+
+For a browser-based Kafka view, start Redpanda Console on the same Compose
+network:
+
+```powershell
+docker run -d --name aquatrace-console `
+  --network ship_default `
+  -p 8080:8080 `
+  -e KAFKA_BROKERS=kafka:9092 `
+  docker.redpanda.com/redpandadata/console:latest
+```
+
+Open http://localhost:8080 and inspect these topics:
+
+- `ais.raw`: incoming AIS events
+- `ais.clean`: validated and deduplicated events
+- `ais.invalid`: rejected events
+- `ais.anomaly`: anomaly detections
+- `ais.prediction`: trajectory/ETA predictions when prediction publishing is enabled
+
+The exact Compose network name may be project-prefixed. If `ship_default` does
+not exist, find it with:
+
+```powershell
+docker network ls
+```
+
+Then replace `ship_default` in the `docker run` command with the actual network
+name.
+
+### 4. Replay Events for the Demonstration
+
+With the stack running, replay the sample AIS data:
+
+```powershell
+docker compose exec api python -m services.producer.replay
+```
+
+Keep the Spark logs, Redpanda Console, and dashboard open at the same time.
+New events should appear in `ais.raw`, then flow through the Spark sinks and
+update the database-backed dashboard metrics.
+
+For a live external AIS stream, configure the required AISStream credentials
+and run the AISStream producer instead of the replay producer:
+
+```powershell
+docker compose exec api python -m services.producer.aisstream
+```
+
+### 5. Safe Project Rebuild
+
+This removes AquaTrace containers, images, volumes, and build cache. It also
+deletes local PostgreSQL data and Spark checkpoints for this Compose project:
+
+```powershell
+docker compose down --volumes --remove-orphans
+docker system prune --all --volumes --force
+docker builder prune --all --force
+docker compose build --no-cache
+docker compose up -d
+```
+
+Use this procedure before a clean project demonstration when you do not need
+to preserve database history.
+
+### 6. Complete Docker Desktop Disk Reset
+
+`E:\Docker\disk\docker_data.vhdx` is Docker Desktop's complete Linux data
+disk. Deleting it removes all Docker images, containers, volumes, build caches,
+and data for every Docker project on this machine, not just AquaTrace.
+
+Do not delete the file while Docker Desktop is running.
+
+First stop the AquaTrace project:
+
+```powershell
+docker compose down --volumes --remove-orphans
+```
+
+Then exit Docker Desktop completely from the Windows system tray and run:
+
+```powershell
+wsl --shutdown
+```
+
+Back up the disk image if it might be needed later:
+
+```powershell
+Copy-Item `
+  "E:\Docker\disk\docker_data.vhdx" `
+  "E:\Docker\disk\docker_data.vhdx.backup"
+```
+
+Only when the complete reset is intentional, delete the disk:
+
+```powershell
+Remove-Item "E:\Docker\disk\docker_data.vhdx" -Force
+```
+
+Start Docker Desktop again. It should recreate the VHDX. Rebuild AquaTrace
+after Docker becomes ready:
+
+```powershell
+docker compose build --no-cache
+docker compose up -d
+docker compose ps
+```
+
+### Recommended Presentation Sequence
+
+1. Open the dashboard and API documentation.
+2. Show `/agents` to introduce the registered specialists.
+3. Submit `/agents/tasks` and show the dependency-aware result.
+4. Open `/agents/trace` to show delegation and correlation IDs.
+5. Open Redpanda Console on the `ais.raw` topic.
+6. Replay AIS events.
+7. Follow one event through `ais.clean`, `ais.anomaly`, or `ais.prediction`.
+8. Return to the dashboard and show the updated metrics and assistant query.

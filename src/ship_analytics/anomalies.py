@@ -1,13 +1,10 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 from shapely.geometry import Point
 
 from ship_analytics.schemas import AisEvent
-
-if TYPE_CHECKING:
-    pass
 
 
 class Anomaly(BaseModel):

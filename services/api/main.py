@@ -1,6 +1,7 @@
 """Ship Analytics API - Real-time vessel tracking and anomaly detection."""
 
 import secrets
+import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
@@ -8,44 +9,94 @@ import psycopg
 from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import JSONResponse
 from psycopg import AsyncConnection
-from psycopg.rows import dict_row
 
 from services.api.phase2 import router as phase2_router
 from services.websocket.handler import get_websocket_handler
+from ship_analytics.agents import get_orchestrator, get_registry
 from ship_analytics.config import get_settings
+from ship_analytics.logging import configure_logging, get_correlation_id, set_correlation_id
+from ship_analytics.metrics import render as render_metrics
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize enhanced WebSocket handler on startup."""
+    configure_logging(get_settings().log_level)
     websocket_handler = await get_websocket_handler()
     app.state.websocket_handler = websocket_handler
+    app.state.registry = get_registry()
+    app.state.orchestrator = get_orchestrator(app.state.registry)
+    await app.state.registry.start_all()
     yield
+    await app.state.registry.stop_all()
 
 
 app = FastAPI(title="Ship Analytics API", version="0.2.0", lifespan=lifespan)
+app.include_router(phase2_router)
+
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    """Generate or propagate X-Correlation-ID and bind it to logging context."""
+    cid = request.headers.get("x-correlation-id") or uuid.uuid4().hex
+    set_correlation_id(cid)
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = cid
+    return response
 
 
 @app.middleware("http")
 async def require_api_token(request: Request, call_next):
     """Protect API routes while leaving health and documentation probes public."""
-    if request.url.path in {"/health", "/docs", "/openapi.json", "/redoc"}:
+    if request.url.path in {"/health", "/docs", "/openapi.json", "/redoc", "/metrics", "/agents", "/agents/trace"}:
         return await call_next(request)
 
     configured_token = get_settings().api_token
     supplied_token = request.headers.get("authorization", "")
     if not configured_token or not supplied_token.startswith("Bearer "):
-        return JSONResponse(status_code=401, content={"detail": "authentication required"})
+        return JSONResponse(
+            status_code=401,
+            content={"error": "authentication required", "correlation_id": get_correlation_id()},
+        )
 
     token = supplied_token[7:].strip()
     if not token or not secrets.compare_digest(token, configured_token):
-        return JSONResponse(status_code=401, content={"detail": "invalid authentication token"})
+        return JSONResponse(
+            status_code=401,
+            content={"error": "invalid authentication token", "correlation_id": get_correlation_id()},
+        )
 
     return await call_next(request)
 
 
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    """Return a generic error envelope; never leak raw exception details."""
+    cid = get_correlation_id()
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": "request failed", "correlation_id": cid, "path": str(request.url.path)},
+        )
+    return JSONResponse(
+        status_code=500,
+        content={"error": "internal server error", "correlation_id": cid, "path": str(request.url.path)},
+    )
+
+
 async def connection() -> AsyncConnection[dict[str, object]]:
-    return await AsyncConnection.connect(get_settings().database_url, row_factory=dict_row)
+    from services.api.db import connection as db_connection
+
+    return await db_connection()
+
+
+def _mount_agent_router() -> None:
+    from services.api.agent_router import router as agent_router
+
+    app.include_router(agent_router)
+
+
+_mount_agent_router()
 
 
 # WebSocket connection manager
@@ -302,4 +353,111 @@ async def websocket_updates(websocket: WebSocket, token: str | None = None):
     await websocket_handler.handle_websocket(websocket, token)
     
 
-app.include_router(phase2_router)
+@app.get("/metrics")
+async def metrics() -> str:
+    """Expose in-process metrics in Prometheus text format."""
+    from fastapi.responses import PlainTextResponse
+
+    return PlainTextResponse(render_metrics(), media_type="text/plain")
+
+
+@app.get("/agents")
+async def agents() -> dict[str, object]:
+    """List registered agents and their capabilities."""
+    registry = app.state.registry
+    orchestrator = app.state.orchestrator
+    return {
+        "registry": registry.snapshot(),
+        "health": await orchestrator.health(),
+        "trace": orchestrator.trace_history(50),
+    }
+
+
+@app.get("/agents/trace")
+async def agents_trace(limit: int = 100) -> list[dict[str, object]]:
+    """Return the recent orchestrator trace (live processing view)."""
+    return app.state.orchestrator.trace_history(limit)
+
+
+@app.post("/agents/query")
+async def agents_query(payload: dict[str, object]) -> dict[str, object]:
+    """Answer a natural-language query through the registered query agent."""
+    query = str(payload.get("query", "")).strip()
+    if not query:
+        raise HTTPException(status_code=422, detail="query is required")
+    return await app.state.orchestrator.run(
+        {"query": query, "context": payload.get("context")},
+        requirements=["natural_language_query"],
+        correlation_id=get_correlation_id(),
+    )
+
+
+@app.post("/agents/tasks")
+async def agents_tasks(payload: dict[str, object]) -> dict[str, object]:
+    """Execute an explicit dependency-aware multi-agent task graph."""
+    from ship_analytics.agents import AgentTask
+
+    raw_tasks = payload.get("tasks")
+    if not isinstance(raw_tasks, list) or not raw_tasks:
+        raise HTTPException(status_code=422, detail="tasks must be a non-empty list")
+    tasks = [
+        AgentTask(
+            task_id=str(item["task_id"]),
+            requirement=str(item["requirement"]),
+            payload=dict(item.get("payload", {})),
+            depends_on=[str(value) for value in item.get("depends_on", [])],
+        )
+        for item in raw_tasks
+        if isinstance(item, dict) and "task_id" in item and "requirement" in item
+    ]
+    if len(tasks) != len(raw_tasks):
+        raise HTTPException(status_code=422, detail="each task needs task_id and requirement")
+    return await app.state.orchestrator.run_task_graph(tasks, get_correlation_id())
+
+
+@app.get("/kafka/offsets")
+async def kafka_offsets() -> dict[str, object]:
+    """Report consumed/end offsets per partition for ais.raw."""
+    from confluent_kafka import Consumer, TopicPartition
+
+    settings = get_settings()
+    kafka_config = {
+        "bootstrap.servers": settings.kafka_brokers,
+        "group.id": "offset-diagnostic",
+        "enable.auto.commit": False,
+        "security.protocol": settings.kafka_security_protocol,
+    }
+    if settings.kafka_security_protocol in {"SASL_PLAINTEXT", "SASL_SSL"}:
+        kafka_config.update(
+            {
+                "sasl.mechanism": settings.kafka_sasl_mechanism,
+                "sasl.username": settings.kafka_sasl_username,
+                "sasl.password": settings.kafka_sasl_password,
+            }
+        )
+    if settings.kafka_security_protocol in {"SSL", "SASL_SSL"}:
+        kafka_config["ssl.ca.location"] = settings.kafka_ssl_ca_location
+    consumer = Consumer(
+        kafka_config
+    )
+    try:
+        metadata = consumer.list_topics("ais.raw", timeout=5)
+        topic = metadata.topics.get("ais.raw")
+        if topic is None:
+            return {"topic": "ais.raw", "partitions": [], "error": "topic not found"}
+        partitions = []
+        for pid in topic.partitions:
+            tp = TopicPartition("ais.raw", pid)
+            low, high = consumer.get_watermark_offsets(tp, timeout=5)
+            committed = consumer.committed([tp], timeout=5)[0].offset
+            partitions.append(
+                {
+                    "partition": pid,
+                    "low_watermark": low,
+                    "high_watermark": high,
+                    "committed_offset": committed,
+                }
+            )
+        return {"topic": "ais.raw", "partitions": partitions}
+    finally:
+        consumer.close()

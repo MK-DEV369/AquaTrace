@@ -1,32 +1,47 @@
 """Natural language analytics for Phase 2: Query assistant with safe analytical tools."""
 
+from __future__ import annotations
+
+import asyncio
+import threading
 from datetime import datetime
+from typing import Any
 
 import numpy as np
 import spacy
 from sentence_transformers import SentenceTransformer
+
+from ship_analytics.llm import LLMProvider
+
+# Map from NL intent/tool name to the approved investigation tools.
+_TOOL_NAME_MAP = {
+    "get_vessel_snapshot": "get_vessel_snapshot",
+    "get_recent_anomalies": "get_recent_anomalies",
+    "get_vessel_track": "get_vessel_track",
+    "compare_vessel_baseline": "compare_vessel_baseline",
+    "find_nearby_vessels": "find_nearby_vessels",
+    "draft_incident_report": "draft_incident_report",
+}
 
 
 class NaturalLanguageProcessor:
     """Process natural language queries for vessel analytics."""
 
     def __init__(self):
-        # Initialize components (would be loaded from environment)
         self.embedding_model = None
         self.nlp_model = None
         self.knowledge_base = {}
         self.tool_registry = {}
+        self.llm = LLMProvider()
 
     def initialize(self):
         """Initialize NLP components."""
         try:
-            # Load sentence transformer for embeddings
-            self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
         except Exception:
             self.embedding_model = None
 
         try:
-            # Load spaCy model for text processing
             self.nlp_model = spacy.load("en_core_web_sm")
         except Exception:
             self.nlp_model = None
@@ -38,17 +53,7 @@ class NaturalLanguageProcessor:
         metric_definitions: list[dict],
         limitations: list[dict],
     ) -> dict[str, float]:
-        """Index knowledge base for semantic search.
-
-        Args:
-            project_docs: Project documentation
-            api_docs: API documentation
-            metric_definitions: Metric definitions
-            limitations: Known limitations
-
-        Returns:
-            Dictionary with indexing statistics
-        """
+        """Index knowledge base for semantic search."""
         all_documents = []
         all_documents.extend(project_docs)
         all_documents.extend(api_docs)
@@ -58,7 +63,6 @@ class NaturalLanguageProcessor:
         if not all_documents:
             return {"documents_indexed": 0, "embedding_size": 0}
 
-        # Create text chunks
         text_chunks = []
         metadata = []
 
@@ -67,22 +71,22 @@ class NaturalLanguageProcessor:
             content = doc.get("content", "")
             doc_type = doc.get("type", "")
 
-            # Split into chunks (simple approach)
             chunks = content.split(". ")
             for chunk in chunks:
                 if chunk.strip():
                     text_chunks.append(chunk.strip())
-                    metadata.append({
-                        "source_title": title,
-                        "source_content": content,
-                        "doc_type": doc_type,
-                        "chunk_length": len(chunk),
-                    })
+                    metadata.append(
+                        {
+                            "source_title": title,
+                            "source_content": content,
+                            "doc_type": doc_type,
+                            "chunk_length": len(chunk),
+                        }
+                    )
 
         if not text_chunks:
             return {"documents_indexed": 0, "embedding_size": 0}
 
-        # Generate embeddings
         if self.embedding_model:
             try:
                 embeddings = self.embedding_model.encode(text_chunks, show_progress_bar=False)
@@ -94,7 +98,6 @@ class NaturalLanguageProcessor:
             embedding_dim = 0
             embeddings = None
 
-        # Store in knowledge base
         self.knowledge_base = {
             "text_chunks": text_chunks,
             "embeddings": embeddings,
@@ -117,17 +120,7 @@ class NaturalLanguageProcessor:
         function_schema: dict,
         validation_rules: dict | None = None,
     ) -> dict[str, str]:
-        """Register a safe analytical tool.
-
-        Args:
-            tool_name: Unique name for the tool
-            description: Human-readable description
-            function_schema: Pydantic model for input validation
-            validation_rules: Additional validation rules
-
-        Returns:
-            Dictionary with registration result
-        """
+        """Register a safe analytical tool."""
         tool = {
             "name": tool_name,
             "description": description,
@@ -150,52 +143,119 @@ class NaturalLanguageProcessor:
         query: str,
         context: dict | None = None,
         user_preferences: dict | None = None,
-    ) -> dict[str, str | list | dict | bool]:
-        """Process a natural language query.
-
-        Args:
-            query: User's natural language query
-            context: Additional context for query interpretation
-            user_preferences: User preferences and settings
-
-        Returns:
-            Dictionary with query results and metadata
-        """
-        # Parse and understand the query
+    ) -> dict[str, Any]:
+        """Process a natural language query using RAG + LLM + real tools."""
         parsed_query = self._parse_query(query, context, user_preferences)
 
-        # Determine required tools
         required_tools = self._identify_required_tools(parsed_query)
 
-        # Validate user permissions
         if not self._validate_user_permissions(user_preferences, required_tools):
             return self._create_refusal_response(
                 "Insufficient permissions for requested analysis"
             )
 
-        # Route to appropriate tools
+        rag_context = self._retrieve_context(query)
+
         results = []
         for tool_name in required_tools:
-            if tool_name in self.tool_registry:
-                tool_result = self._execute_tool(
-                    tool_name, parsed_query, context, user_preferences
-                )
+            tool_name = _TOOL_NAME_MAP.get(tool_name, tool_name)
+            if tool_name in _TOOL_NAME_MAP.values():
+                tool_result = self._execute_tool_real(tool_name, parsed_query, context)
                 results.append(tool_result)
             else:
-                return self._create_refusal_response(
-                    f"Tool '{tool_name}' is not available or registered"
+                results.append(self._create_error_response(f"Tool '{tool_name}' is not available"))
+
+        answer = self._generate_answer(query, rag_context, results)
+
+        response = self._format_query_response(results, parsed_query)
+        response["answer"] = answer
+        response["rag_context"] = rag_context
+        return response
+
+    def _retrieve_context(self, query: str) -> list[dict[str, Any]]:
+        """Retrieve relevant knowledge-base chunks via embedding similarity."""
+        kb = self.knowledge_base
+        if not kb or not kb.get("text_chunks") or self.embedding_model is None or kb.get("embeddings") is None:
+            return []
+        try:
+            q_emb = self.embedding_model.encode([query])
+            embs = kb["embeddings"]
+            # Cosine similarity.
+            import numpy as np
+
+            q = q_emb[0]
+            norms = np.linalg.norm(embs, axis=1) * (np.linalg.norm(q) + 1e-9)
+            sims = (embs @ q) / (norms + 1e-9)
+            top_idx = np.argsort(sims)[::-1][:5]
+            out = []
+            for i in top_idx:
+                out.append(
+                    {
+                        "text": kb["text_chunks"][i],
+                        "metadata": kb["metadata"][i],
+                        "score": float(sims[i]),
+                    }
                 )
+            return out
+        except Exception:
+            return []
 
-        # Format and return results
-        return self._format_query_response(results, parsed_query)
-
-    def _parse_query(
+    def _execute_tool_real(
         self,
-        query: str,
+        tool_name: str,
+        parsed_query: dict,
         context: dict | None,
-        user_preferences: dict | None,
-    ) -> dict[str, str | list | dict]:
-        """Parse and understand natural language query."""
+    ) -> dict[str, Any]:
+        """Execute an approved investigation tool for real."""
+        from services.agent.tools import execute_tool
+
+        # Build minimal parameters from parsed query + context.
+        params: dict[str, Any] = {}
+        entities = parsed_query.get("entities", [])
+        mmsi = None
+        for e in entities:
+            if isinstance(e, str) and e.isdigit() and len(e) == 9:
+                mmsi = int(e)
+        if context and context.get("mmsi"):
+            mmsi = int(context["mmsi"])
+        if mmsi is not None:
+            params["mmsi"] = mmsi
+
+        if tool_name == "get_vessel_track":
+            now = datetime.utcnow()
+            params.setdefault("start", (now - __import__("datetime").timedelta(hours=24)).isoformat())
+            params.setdefault("end", now.isoformat())
+
+        try:
+            result = _run_async_in_any_context(execute_tool, tool_name, params)
+        except Exception as exc:
+            return self._create_error_response(str(exc))
+
+        return {
+            "tool_name": tool_name,
+            "status": "success",
+            "result": result,
+        }
+    def _generate_answer(self, query: str, rag_context: list[dict], results: list[dict]) -> str:
+        """Generate a natural-language answer via the LLM."""
+        if not self.llm.is_available():
+            return "LLM provider unavailable; returning tool results only."
+        system = (
+            "You are AquaTrace AI, a maritime investigation assistant. "
+            "Answer the user's question using only the provided context and tool results. "
+            "Be concise and cite vessel MMSI and timestamps when relevant."
+        )
+        user = (
+            f"Question: {query}\n\n"
+            f"Retrieved context:\n{rag_context}\n\n"
+            f"Tool results:\n{results}\n"
+        )
+        try:
+            return self.llm.chat(system, user)
+        except Exception as exc:
+            return f"LLM call failed: {exc}"
+
+    def _parse_query(self, query, context, user_preferences):
         parsed = {
             "original_query": query,
             "intent": self._detect_query_intent(query),
@@ -206,16 +266,11 @@ class NaturalLanguageProcessor:
             "metrics": self._extract_metrics(query),
             "confidence": 0.0,
         }
-
-        # Calculate confidence score
         parsed["confidence"] = self._calculate_parsing_confidence(query)
-
         return parsed
 
-    def _detect_query_intent(self, query: str) -> str:
-        """Detect the intent behind the query."""
+    def _detect_query_intent(self, query):
         query_lower = query.lower()
-
         if any(keyword in query_lower for keyword in ["what", "how many", "count", "total"]):
             if any(keyword in query_lower for keyword in ["vessel", "ship", "boat"]):
                 return "vessel_count"
@@ -238,8 +293,7 @@ class NaturalLanguageProcessor:
         else:
             return "general_question"
 
-    def _extract_entities(self, query: str) -> list[str]:
-        """Extract named entities from query."""
+    def _extract_entities(self, query):
         if self.nlp_model:
             try:
                 doc = self.nlp_model(query)
@@ -249,40 +303,28 @@ class NaturalLanguageProcessor:
                 return []
         return []
 
-    def _extract_time_range(self, query: str, context: dict | None) -> dict[str, datetime | None]:
-        """Extract time range from query."""
+    def _extract_time_range(self, query, context):
         time_range = {"start": None, "end": None}
-
-        # Parse time patterns
         import re
 
-        # Look for time patterns like "last 24 hours", "from 2024-01-01", etc.
         time_patterns = [
-            r'(?i)last (\d+) (hour|day|week|month)s?',
-            r'(?i)from (\d{4}-\d{2}-\d{2})',
-            r'(?i)to (\d{4}-\d{2}-\d{2})',
-            r'(?i)after (\d{4}-\d{2}-\d{2})',
-            r'(?i)before (\d{4}-\d{2}-\d{2})',
+            r"(?i)last (\d+) (hour|day|week|month)s?",
+            r"(?i)from (\d{4}-\d{2}-\d{2})",
+            r"(?i)to (\d{4}-\d{2}-\d{2})",
+            r"(?i)after (\d{4}-\d{2}-\d{2})",
+            r"(?i)before (\d{4}-\d{2}-\d{2})",
         ]
-
         for pattern in time_patterns:
             re.findall(pattern, query)
-            # TODO: Convert matches to datetime objects and set time_range
-
-        # Use context if available
         if context and "time_range" in context:
             time_range.update(context["time_range"])
-
         return time_range
 
-    def _extract_geography(self, query: str) -> dict[str, float] | None:
-        """Extract geographic bounds from query."""
-        # Look for bounding box patterns like "bbox 1.15 103.55 1.45 104.10"
+    def _extract_geography(self, query):
         import re
 
-        bbox_pattern = r'(?i)bbox\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)'
+        bbox_pattern = r"(?i)bbox\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)\s+(-?\d+\.?\d*)"
         match = re.search(bbox_pattern, query)
-
         if match:
             try:
                 min_lat, min_lon, max_lat, max_lon = map(float, match.groups())
@@ -294,14 +336,11 @@ class NaturalLanguageProcessor:
                 }
             except ValueError:
                 pass
-
         return None
 
-    def _extract_vessel_types(self, query: str) -> list[str]:
-        """Extract vessel types from query."""
+    def _extract_vessel_types(self, query):
         vessel_types = []
         query_lower = query.lower()
-
         vessel_keywords = {
             "cargo": ["cargo", "merchant"],
             "tanker": ["tanker", "oil", "chemical"],
@@ -309,15 +348,12 @@ class NaturalLanguageProcessor:
             "fishing": ["fishing", "fisheries"],
             "military": ["military", "naval", "warship"],
         }
-
         for vessel_type, keywords in vessel_keywords.items():
             if any(keyword in query_lower for keyword in keywords):
                 vessel_types.append(vessel_type)
-
         return vessel_types
 
-    def _extract_metrics(self, query: str) -> list[str]:
-        """Extract metrics from query."""
+    def _extract_metrics(self, query):
         metric_keywords = {
             "speed": ["speed", "velocity", "sog"],
             "course": ["course", "heading", "cog"],
@@ -328,158 +364,61 @@ class NaturalLanguageProcessor:
             "maximum": ["maximum", "max", "highest"],
             "minimum": ["minimum", "min", "lowest"],
         }
-
         metrics = []
         query_lower = query.lower()
-
         for metric, keywords in metric_keywords.items():
             if any(keyword in query_lower for keyword in keywords):
                 metrics.append(metric)
-
         return metrics
 
-    def _calculate_parsing_confidence(self, query: str) -> float:
-        """Calculate confidence score for query parsing."""
+    def _calculate_parsing_confidence(self, query):
         confidence = 1.0
-
-        # Reduce confidence for very short queries
         if len(query.strip().split()) < 3:
             confidence *= 0.7
-
-        # Check for ambiguous terms
         ambiguous_terms = ["it", "they", "there", "this", "that"]
         ambiguous_count = sum(1 for term in ambiguous_terms if term in query.lower().split())
         confidence *= (1.0 - ambiguous_count * 0.1)
-
         return max(0.0, min(1.0, confidence))
 
-    def _validate_user_permissions(
-        self,
-        user_preferences: dict | None,
-        required_tools: list[str],
-    ) -> bool:
-        """Validate user permissions for requested tools."""
+    def _validate_user_permissions(self, user_preferences, required_tools):
         if not user_preferences:
-            return True  # No restrictions by default
-
+            return True
         user_roles = user_preferences.get("roles", [])
         permissions = user_preferences.get("permissions", {})
-
         for tool_name in required_tools:
             if tool_name in self.tool_registry:
                 tool = self.tool_registry[tool_name]
                 required_role = tool.get("required_role")
-
                 if required_role and required_role not in user_roles:
                     return False
-
-                # Check specific permissions
                 if "read" in permissions and "read" not in tool.get("permissions", []):
                     return False
-
                 if "write" in permissions and "write" not in tool.get("permissions", []):
                     return False
-
         return True
 
-    def _execute_tool(
-        self,
-        tool_name: str,
-        parsed_query: dict,
-        context: dict | None,
-        user_preferences: dict | None,
-    ) -> dict[str, str | list | dict]:
-        """Execute a tool with validated inputs."""
-        if tool_name not in self.tool_registry:
-            return self._create_error_response(f"Tool '{tool_name}' not found")
+    def _identify_required_tools(self, parsed_query):
+        intent = parsed_query.get("intent", "")
+        tools = []
+        if "anomal" in intent or "anomaly" in parsed_query["original_query"].lower():
+            tools.append("get_recent_anomalies")
+        if "track" in intent or "track" in parsed_query["original_query"].lower() or "route" in parsed_query["original_query"].lower():
+            tools.append("get_vessel_track")
+        if "nearby" in parsed_query["original_query"].lower() or "surrounding" in parsed_query["original_query"].lower():
+            tools.append("find_nearby_vessels")
+        if "baseline" in parsed_query["original_query"].lower() or "compare" in parsed_query["original_query"].lower():
+            tools.append("compare_vessel_baseline")
+        if "incident" in parsed_query["original_query"].lower() or "report" in parsed_query["original_query"].lower():
+            tools.append("draft_incident_report")
+        # Default: vessel snapshot.
+        if not tools:
+            tools.append("get_vessel_snapshot")
+        # Always include snapshot for context if a vessel is referenced.
+        if "get_vessel_snapshot" not in tools and any(c.isdigit() for c in parsed_query["original_query"]):
+            tools.insert(0, "get_vessel_snapshot")
+        return tools
 
-        tool = self.tool_registry[tool_name]
-
-        # Validate inputs against tool schema
-        validated_inputs = self._validate_tool_inputs(
-            tool, parsed_query, context, user_preferences
-        )
-
-        if not validated_inputs.get("is_valid", True):
-            return self._create_error_response(
-                f"Input validation failed: {validated_inputs.get('error', 'Unknown error')}"
-            )
-
-        # Execute the tool (simplified)
-        tool_result = self._simulate_tool_execution(tool, validated_inputs)
-
-        # Update usage tracking
-        tool["usage_count"] += 1
-        tool["last_used"] = datetime.utcnow().isoformat()
-
-        return tool_result
-
-    def _validate_tool_inputs(
-        self,
-        tool: dict,
-        parsed_query: dict,
-        context: dict | None,
-        user_preferences: dict | None,
-    ) -> dict[str, bool | str]:
-        """Validate tool inputs against schema and rules."""
-        # Check if tool schema exists
-        if "schema" not in tool:
-            return {"is_valid": True}  # No schema = no validation
-
-        # Simple validation (would use pydantic in production)
-        schema = tool["schema"]
-
-        # Check required parameters
-        required_params = schema.get("required_params", [])
-        for param in required_params:
-            if param not in parsed_query and param not in context:
-                return {
-                    "is_valid": False,
-                    "error": f"Missing required parameter: {param}",
-                }
-
-        # Check validation rules
-        validation_rules = tool.get("validation_rules", {})
-        if validation_rules:
-            # Implement validation rule checks
-            pass
-
-        return {"is_valid": True}
-
-    def _simulate_tool_execution(
-        self,
-        tool: dict,
-        validated_inputs: dict,
-    ) -> dict[str, str | list | dict]:
-        """Simulate tool execution (placeholder for real implementations)."""
-        tool_name = tool["name"]
-        description = tool["description"]
-
-        # Return a realistic but simulated tool result
-        return {
-            "tool_name": tool_name,
-            "description": description,
-            "execution_time": "0.05s",
-            "status": "success",
-            "result_type": "query_result",
-            "data_preview": {
-                "record_count": 42,
-                "columns": ["event_id", "mmsi", "event_time", "latitude", "longitude"],
-                "sample_data": [
-                    {"event_id": "event_001", "mmsi": 123456789, "event_time": "2024-01-01T10:00:00Z"},
-                    {"event_id": "event_002", "mmsi": 123456789, "event_time": "2024-01-01T10:05:00Z"},
-                ],
-            },
-            "metadata": {
-                "query_understanding": 0.95,
-                "tool_accuracy": 0.92,
-                "response_time_ms": 50,
-                "confidence_score": 0.88,
-            },
-        }
-
-    def _create_refusal_response(self, reason: str) -> dict[str, str]:
-        """Create a refusal response for unsafe queries."""
+    def _create_refusal_response(self, reason):
         return {
             "status": "refused",
             "reason": reason,
@@ -491,20 +430,14 @@ class NaturalLanguageProcessor:
             ],
         }
 
-    def _create_error_response(self, error: str) -> dict[str, str]:
-        """Create an error response."""
+    def _create_error_response(self, error):
         return {
             "status": "error",
             "error": error,
             "suggestion": "Please check your query and try again.",
         }
 
-    def _format_query_response(
-        self,
-        tool_results: list[dict],
-        parsed_query: dict,
-    ) -> dict[str, str | list | dict | bool]:
-        """Format query results for the user."""
+    def _format_query_response(self, tool_results, parsed_query):
         return {
             "query": parsed_query["original_query"],
             "intent": parsed_query["intent"],
@@ -515,7 +448,11 @@ class NaturalLanguageProcessor:
                 "query_processing_time_ms": sum(
                     r.get("metadata", {}).get("response_time_ms", 0) for r in tool_results
                 ),
-                "average_confidence": np.mean([r.get("metadata", {}).get("confidence_score", 0) for r in tool_results]),
+                "average_confidence": float(
+                    np.mean([r.get("metadata", {}).get("confidence_score", 0) for r in tool_results])
+                    if tool_results
+                    else 0.0
+                ),
             },
             "safety_assessment": {
                 "all_tools_safe": True,
@@ -523,3 +460,27 @@ class NaturalLanguageProcessor:
                 "sensitive_data_detected": False,
             },
         }
+
+
+def _run_async_in_any_context(function, *args):
+    """Run an async tool from sync NLP code, including inside an active loop."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(function(*args))
+
+    outcome: dict[str, Any] = {}
+    error: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            outcome["value"] = asyncio.run(function(*args))
+        except BaseException as exc:
+            error.append(exc)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join()
+    if error:
+        raise error[0]
+    return outcome["value"]

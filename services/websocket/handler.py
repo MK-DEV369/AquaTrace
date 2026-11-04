@@ -1,22 +1,10 @@
 """WebSocket handler with enhanced authentication and message processing."""
 
-import asyncio
 from datetime import datetime
-from typing import Optional
 
-from fastapi import Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 from services.websocket.connection_manager import EnhancedConnectionManager
-from services.websocket.schemas import (
-    AnalyticsUpdate,
-    AuthenticationMessage,
-    MLModelUpdate,
-    QueryMessage,
-    RouteDiscoveryUpdate,
-    SystemStatusMessage,
-    UpdateMessage,
-    WebSocketMessage,
-)
 from ship_analytics.config import get_settings
 
 
@@ -33,7 +21,7 @@ class WebSocketHandler:
             'heartbeat': self._handle_heartbeat_message,
         }
     
-    async def handle_websocket(self, websocket: WebSocket, token: Optional[str] = None):
+    async def handle_websocket(self, websocket: WebSocket, token: str | None = None):
         """Handle WebSocket connection with authentication."""
         connection_id = None
         try:
@@ -313,7 +301,7 @@ async def get_websocket_handler() -> WebSocketHandler:
     return WebSocketHandler(connection_manager)
 
 
-def get_websocket_token(websocket: WebSocket) -> Optional[str]:
+def get_websocket_token(websocket: WebSocket) -> str | None:
     """Extract JWT token from WebSocket query parameters."""
     query_string = websocket.url.query
     if query_string:

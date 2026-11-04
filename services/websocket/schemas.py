@@ -1,7 +1,7 @@
 """WebSocket message validation schemas."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, validator
@@ -12,8 +12,8 @@ class WebSocketMessage(BaseModel):
     
     type: str = Field(..., pattern=r'^[a-zA-Z][a-zA-Z0-9_]*$')
     timestamp: datetime
-    data: Dict[str, Any]
-    user_id: Optional[str] = None
+    data: dict[str, Any]
+    user_id: str | None = None
     session_id: str = Field(default_factory=lambda: str(UUID().hex[:32]))
     message_id: str = Field(default_factory=lambda: str(UUID().hex[:32]))
     
@@ -56,7 +56,7 @@ class HeartbeatMessage(WebSocketMessage):
     """Heartbeat message for connection health monitoring."""
     
     type: Literal['heartbeat'] = 'heartbeat'
-    data: Dict[str, Any] = Field(default_factory=lambda: {'status': 'alive'})
+    data: dict[str, Any] = Field(default_factory=lambda: {'status': 'alive'})
 
 
 class UpdateMessage(WebSocketMessage):
@@ -99,7 +99,7 @@ class ErrorMessage(WebSocketMessage):
     """Message for error reporting."""
     
     type: Literal['error'] = 'error'
-    data: Dict[str, Any] = Field(default_factory=lambda: {'error_type': 'unknown'})
+    data: dict[str, Any] = Field(default_factory=lambda: {'error_type': 'unknown'})
 
 
 class AnalyticsUpdate(BaseModel):
@@ -110,10 +110,10 @@ class AnalyticsUpdate(BaseModel):
     event_time: datetime
     anomaly_score: float
     severity: Literal['low', 'medium', 'high']
-    route_cluster: Optional[str] = None
-    eta_prediction: Optional[datetime] = None
+    route_cluster: str | None = None
+    eta_prediction: datetime | None = None
     confidence: float
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RouteDiscoveryUpdate(BaseModel):
@@ -128,7 +128,7 @@ class RouteDiscoveryUpdate(BaseModel):
     num_points: int
     start_time: datetime
     end_time: datetime
-    geometry: Dict[str, Any] = Field(default_factory=dict)
+    geometry: dict[str, Any] = Field(default_factory=dict)
 
 
 class MLModelUpdate(BaseModel):
@@ -139,7 +139,7 @@ class MLModelUpdate(BaseModel):
     version: str
     accuracy: float
     last_trained: datetime
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     training_data_size: int
 
 
@@ -152,7 +152,7 @@ class SystemStatusMessage(BaseModel):
     messages_processed: int
     errors: int
     latency_ms: float
-    memory_usage: Dict[str, float]
+    memory_usage: dict[str, float]
     cpu_usage: float
     timestamp: datetime
 
@@ -164,7 +164,7 @@ class AuthenticationMessage(BaseModel):
     token: str
     expires_at: datetime
     user_id: str
-    permissions: List[str] = Field(default_factory=list)
+    permissions: list[str] = Field(default_factory=list)
 
 
 # Type alias for all WebSocket message types

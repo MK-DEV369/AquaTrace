@@ -9,7 +9,11 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends openjdk-21-jre-headless procps && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir "pyspark==3.5.5"
+RUN pip install --no-cache-dir "pyspark==3.5.5" && \
+    pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cpu \
+        --extra-index-url https://pypi.org/simple \
+        "torch>=2.6.0,<3"
 
 COPY pyproject.toml README.md ./
 COPY src ./src
@@ -17,6 +21,7 @@ COPY services ./services
 
 RUN pip install --no-cache-dir --no-deps . && \
     pip install --no-cache-dir \
+        "confluent-kafka>=2.6,<3" \
         "psycopg[binary]>=3.2,<4" \
         "pydantic>=2.9,<3" \
         "pydantic-settings>=2.5,<3" \

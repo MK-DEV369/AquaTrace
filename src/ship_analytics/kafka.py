@@ -1,6 +1,17 @@
 from confluent_kafka.admin import AdminClient, NewTopic
 
-TOPICS = ("ais.raw", "ais.clean", "ais.invalid", "ais.anomalies")
+TOPICS = (
+    "ais.raw",
+    "ais.clean",
+    "ais.invalid",
+    "ais.anomalies",
+    "ais.anomaly",
+    "ais.prediction",
+    "ais.alert",
+    "ais.dlq",
+    "agent.investigations",
+    "agent.alerts",
+)
 
 
 def ensure_topics(bootstrap_servers: str) -> None:

@@ -5,14 +5,14 @@ designed for maritime vessel tracking data with enhanced spatial features,
 parameter optimization, and streaming capabilities.
 """
 
-import numpy as np
-from datetime import datetime
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
-from sklearn.cluster import DBSCAN
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import silhouette_score, davies_bouldin_score
+from typing import Any
+
+import numpy as np
 from scipy.spatial.distance import squareform
+from sklearn.cluster import DBSCAN
+from sklearn.metrics import davies_bouldin_score, silhouette_score
+from sklearn.preprocessing import StandardScaler
 
 from ship_analytics.schemas import AisEvent
 
@@ -26,9 +26,9 @@ class ClusteringParameters:
     algorithm: str = 'auto'
     leaf_size: int = 30
     metric: str = 'euclidean'
-    metric_params: Optional[Dict] = None
-    p: Optional[float] = None
-    n_jobs: Optional[int] = None
+    metric_params: dict | None = None
+    p: float | None = None
+    n_jobs: int | None = None
     min_cluster_size: float = 0.01
     cluster_selection_method: str = 'eomatic'
 
@@ -45,7 +45,7 @@ class ClusteringMetrics:
     knee_score: float = 0.0
     n_clusters: int = 0
     n_noise_points: int = 0
-    cluster_sizes: List[int] = None
+    cluster_sizes: list[int] = None
     
     def __post_init__(self):
         if self.cluster_sizes is None:
@@ -56,7 +56,7 @@ class ParameterOptimizer:
     """Advanced DBSCAN parameter optimization using multiple algorithms."""
     
     def __init__(self, feature_matrix: np.ndarray, max_eps: float = 5.0, 
-                 eps_steps: int = 50, min_samples_range: Tuple[int, int] = (3, 20)):
+                 eps_steps: int = 50, min_samples_range: tuple[int, int] = (3, 20)):
         self.feature_matrix = feature_matrix
         self.max_eps = max_eps
         self.eps_steps = eps_steps
@@ -65,7 +65,7 @@ class ParameterOptimizer:
         self.elbow_optimizer = ElbowOptimizer()
         self.knee_optimizer = KneeOptimizer()
     
-    def optimize_parameters(self) -> Dict[str, Any]:
+    def optimize_parameters(self) -> dict[str, Any]:
         """Run all optimization algorithms and return consensus parameters."""
         # Generate parameter grid
         eps_values = np.linspace(0.1, self.max_eps, self.eps_steps)
@@ -98,7 +98,7 @@ class ParameterOptimizer:
         }
     
     def _grid_search_optimization(self, eps_values: np.ndarray, 
-                                 min_samples_values: List[int]) -> Dict:
+                                 min_samples_values: list[int]) -> dict:
         """Perform grid search optimization over parameter space."""
         results = []
         
@@ -126,7 +126,7 @@ class ParameterOptimizer:
         else:
             return {'eps': 0.5, 'min_samples': 5, 'metrics': {}, 'validity_scores': {}}
     
-    def _calculate_clustering_metrics(self, X: np.ndarray, labels: np.ndarray) -> Dict:
+    def _calculate_clustering_metrics(self, X: np.ndarray, labels: np.ndarray) -> dict:
         """Calculate comprehensive clustering metrics."""
         n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
         n_noise_points = sum(1 for label in labels if label == -1)
@@ -160,7 +160,7 @@ class ParameterOptimizer:
         
         return metrics
     
-    def _calculate_validity_scores(self, metrics: Dict) -> Dict:
+    def _calculate_validity_scores(self, metrics: dict) -> dict:
         """Calculate enhanced validity scores for parameter selection."""
         scores = {}
         
@@ -252,8 +252,8 @@ class ParameterOptimizer:
         
         return min_distance if min_distance != float('inf') else 0.0
     
-    def _ensemble_parameter_selection(self, grid_result: Dict, silhouette_result: Dict,
-                                    elbow_result: Dict, knee_result: Dict) -> Dict:
+    def _ensemble_parameter_selection(self, grid_result: dict, silhouette_result: dict,
+                                    elbow_result: dict, knee_result: dict) -> dict:
         """Select parameters using ensemble method combining all optimization results."""
         candidates = []
         
@@ -292,7 +292,7 @@ class ParameterOptimizer:
             'confidence_score': best_score,
         }
     
-    def _calculate_candidate_score(self, candidate: Dict) -> float:
+    def _calculate_candidate_score(self, candidate: dict) -> float:
         """Calculate overall score for a candidate parameter set."""
         scores = []
         
@@ -325,7 +325,7 @@ class ParameterOptimizer:
 class SilhouetteOptimizer:
     """Silhouette score based parameter optimization."""
     
-    def optimize(self, X: np.ndarray, eps_values: Optional[List[float]] = None) -> Dict:
+    def optimize(self, X: np.ndarray, eps_values: list[float] | None = None) -> dict:
         """Optimize parameters using silhouette score maximization."""
         if eps_values is None:
             eps_values = np.linspace(0.1, 5.0, 30)
@@ -357,7 +357,7 @@ class SilhouetteOptimizer:
 class ElbowOptimizer:
     """Elbow method based parameter optimization."""
     
-    def optimize(self, X: np.ndarray) -> Dict:
+    def optimize(self, X: np.ndarray) -> dict:
         """Optimize parameters using elbow method."""
         eps_values = np.linspace(0.1, 5.0, 40)
         silhouette_scores = []
@@ -413,7 +413,7 @@ class ElbowOptimizer:
 class KneeDetector:
     """Knee point detection for DBSCAN parameter optimization."""
     
-    def optimize(self, X: np.ndarray) -> Dict:
+    def optimize(self, X: np.ndarray) -> dict:
         """Optimize parameters using knee point detection."""
         eps_values = np.linspace(0.1, 5.0, 40)
         silhouette_scores = []
@@ -445,7 +445,7 @@ class KneeDetector:
         
         return {'eps': 0.5, 'min_samples': 5, 'silhouette_score': 0.0, 'method': 'knee_detection'}
     
-    def _detect_knee_point(self, scores: List[float]) -> int:
+    def _detect_knee_point(self, scores: list[float]) -> int:
         """Detect knee point using curvature method."""
         if len(scores) < 3:
             return len(scores) - 1
@@ -473,7 +473,7 @@ class SpatialFeatureExtractor:
         self.scaler = StandardScaler()
         self.geometric_transformer = GeometricTransformer()
     
-    def extract_features(self, event: AisEvent, vessel_history: List[AisEvent]) -> np.ndarray:
+    def extract_features(self, event: AisEvent, vessel_history: list[AisEvent]) -> np.ndarray:
         """Extract comprehensive spatial features for a vessel event."""
         # Basic spatial features
         basic_features = self._extract_basic_spatial_features(event, vessel_history)
@@ -502,7 +502,7 @@ class SpatialFeatureExtractor:
         return all_features
     
     def _extract_basic_spatial_features(self, event: AisEvent, 
-                                       vessel_history: List[AisEvent]) -> np.ndarray:
+                                       vessel_history: list[AisEvent]) -> np.ndarray:
         """Extract basic spatial position features."""
         features = [
             event.latitude,
@@ -528,7 +528,7 @@ class SpatialFeatureExtractor:
         return np.array(features)
     
     def _extract_velocity_features(self, event: AisEvent, 
-                                   vessel_history: List[AisEvent]) -> np.ndarray:
+                                   vessel_history: list[AisEvent]) -> np.ndarray:
         """Extract velocity and course consistency features."""
         if len(vessel_history) < 3:
             return np.zeros(4)
@@ -559,7 +559,7 @@ class SpatialFeatureExtractor:
         return np.array(features)
     
     def _extract_trajectory_features(self, event: AisEvent, 
-                                     vessel_history: List[AisEvent]) -> np.ndarray:
+                                     vessel_history: list[AisEvent]) -> np.ndarray:
         """Extract trajectory curvature and pattern features."""
         if len(vessel_history) < 3:
             return np.zeros(6)
@@ -607,7 +607,7 @@ class SpatialFeatureExtractor:
         return np.array(features)
     
     def _extract_statistical_features(self, event: AisEvent, 
-                                      vessel_history: List[AisEvent]) -> np.ndarray:
+                                      vessel_history: list[AisEvent]) -> np.ndarray:
         """Extract statistical features from vessel history."""
         if not vessel_history:
             return np.zeros(8)
@@ -647,7 +647,7 @@ class SpatialFeatureExtractor:
 class GeometricTransformer:
     """Geometric transformations for vessel trajectory analysis."""
     
-    def transform(self, event: AisEvent, vessel_history: List[AisEvent]) -> np.ndarray:
+    def transform(self, event: AisEvent, vessel_history: list[AisEvent]) -> np.ndarray:
         """Transform geometric features from vessel event."""
         features = []
         
@@ -669,7 +669,7 @@ class GeometricTransformer:
         
         return np.array(features)
     
-    def _calculate_trajectory_length(self, trajectory: List[tuple]) -> float:
+    def _calculate_trajectory_length(self, trajectory: list[tuple]) -> float:
         """Calculate total trajectory length."""
         if len(trajectory) < 2:
             return 0.0
@@ -683,7 +683,7 @@ class GeometricTransformer:
         
         return total_distance
     
-    def _calculate_direction_change(self, trajectory: List[tuple]) -> float:
+    def _calculate_direction_change(self, trajectory: list[tuple]) -> float:
         """Calculate total direction change in trajectory."""
         if len(trajectory) < 3:
             return 0.0
@@ -699,7 +699,7 @@ class GeometricTransformer:
         
         return np.mean(direction_changes) if direction_changes else 0.0
     
-    def _calculate_speed_variation(self, trajectory: List[tuple]) -> float:
+    def _calculate_speed_variation(self, trajectory: list[tuple]) -> float:
         """Calculate speed variation in trajectory."""
         if len(trajectory) < 2:
             return 0.0
@@ -709,7 +709,7 @@ class GeometricTransformer:
         
         return np.std(speed_changes) if len(speed_changes) > 1 else 0.0
     
-    def _calculate_course_consistency(self, trajectory: List[tuple]) -> float:
+    def _calculate_course_consistency(self, trajectory: list[tuple]) -> float:
         """Calculate course consistency in trajectory."""
         if len(trajectory) < 3:
             return 0.0
@@ -728,7 +728,7 @@ class GeometricTransformer:
         circular_variance = 1 - np.sqrt(mean_cos**2 + mean_sin**2)
         return circular_variance
     
-    def _calculate_spatial_density(self, trajectory: List[tuple]) -> float:
+    def _calculate_spatial_density(self, trajectory: list[tuple]) -> float:
         """Calculate spatial density of trajectory points."""
         if len(trajectory) < 3:
             return 0.0
@@ -746,7 +746,7 @@ class GeometricTransformer:
     
     def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate great-circle distance between two points in kilometers."""
-        from math import radians, sin, cos, sqrt, atan2
+        from math import atan2, cos, radians, sin, sqrt
         
         R = 6371  # Earth radius in km
         
@@ -761,8 +761,8 @@ class GeometricTransformer:
 class AdvancedDBSCAN:
     """Advanced DBSCAN implementation with parameter optimization and feature enhancement."""
     
-    def __init__(self, spatial_feature_extractor: Optional[SpatialFeatureExtractor] = None,
-                 parameter_optimizer: Optional[ParameterOptimizer] = None):
+    def __init__(self, spatial_feature_extractor: SpatialFeatureExtractor | None = None,
+                 parameter_optimizer: ParameterOptimizer | None = None):
         self.spatial_feature_extractor = spatial_feature_extractor or SpatialFeatureExtractor()
         self.parameter_optimizer = parameter_optimizer
         self.is_fitted = False
@@ -770,7 +770,7 @@ class AdvancedDBSCAN:
         self.clustering_metrics = None
         self.scaler = StandardScaler()
     
-    def fit(self, vessel_events: List[AisEvent]) -> 'AdvancedDBSCAN':
+    def fit(self, vessel_events: list[AisEvent]) -> 'AdvancedDBSCAN':
         """Train DBSCAN clustering with optimized parameters."""
         if len(vessel_events) < 2:
             raise ValueError("Need at least 2 events for clustering")
@@ -820,7 +820,7 @@ class AdvancedDBSCAN:
         
         return self
     
-    def predict(self, event: AisEvent, vessel_events: List[AisEvent]) -> int:
+    def predict(self, event: AisEvent, vessel_events: list[AisEvent]) -> int:
         """Predict cluster for a single event."""
         if not self.is_fitted:
             raise ValueError("Model must be fitted before prediction")
@@ -834,12 +834,12 @@ class AdvancedDBSCAN:
         
         return int(cluster_label)
     
-    def fit_predict(self, vessel_events: List[AisEvent]) -> np.ndarray:
+    def fit_predict(self, vessel_events: list[AisEvent]) -> np.ndarray:
         """Fit clustering and predict cluster labels for all events."""
         self.fit(vessel_events)
         return self.labels_
     
-    def get_clusters(self, vessel_events: List[AisEvent]) -> Dict[str, Any]:
+    def get_clusters(self, vessel_events: list[AisEvent]) -> dict[str, Any]:
         """Get detailed cluster information."""
         if not self.is_fitted:
             raise ValueError("Model must be fitted before getting clusters")
@@ -879,7 +879,7 @@ class AdvancedDBSCAN:
         
         return clusters
     
-    def get_clustering_summary(self) -> Dict[str, Any]:
+    def get_clustering_summary(self) -> dict[str, Any]:
         """Get comprehensive clustering summary."""
         if not self.is_fitted:
             raise ValueError("Model must be fitted before getting summary")
@@ -988,7 +988,7 @@ class AdvancedDBSCAN:
     
     def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate great-circle distance between two points in kilometers."""
-        from math import radians, sin, cos, sqrt, atan2
+        from math import atan2, cos, radians, sin, sqrt
         
         R = 6371  # Earth radius in km
         
@@ -1007,11 +1007,11 @@ class AdvancedDBSCAN:
 
 # Convenience function for quick clustering
 async def discover_routes_with_advanced_dbscan(
-    vessel_events: List[AisEvent],
+    vessel_events: list[AisEvent],
     eps: float = 0.5,
     min_samples: int = 5,
     use_optimization: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Quick function to discover routes using advanced DBSCAN."""
     spatial_extractor = SpatialFeatureExtractor()
     

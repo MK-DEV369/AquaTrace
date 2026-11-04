@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ship
       POSTGRES_PASSWORD: ship_dev_password
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
@@ -40,12 +40,16 @@ services:
       retries: 20
 
   api:
-    build: .
+    image: ship-analytics:production
+    build:
+      context: .
+      dockerfile: Dockerfile
     command: uvicorn services.api.main:app --host 0.0.0.0 --port 8000
     environment:
       SHIP_DATABASE_URL: postgresql://ship:ship_dev_password@postgres:5432/ship
       SHIP_KAFKA_BROKERS: kafka:9092
       SHIP_API_TOKEN: dev-api-token-change-me
+      SHIP_JWT_SECRET: ${SHIP_JWT_SECRET:-local-development-only-change-this-secret}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -53,7 +57,10 @@ services:
         condition: service_healthy
 
   dashboard:
-    build: .
+    image: ship-analytics:production
+    build:
+      context: .
+      dockerfile: Dockerfile
     command: streamlit run services/dashboard/app.py --server.address 0.0.0.0 --server.port 8501
     environment:
       API_BASE_URL: http://api:8000
@@ -75,6 +82,7 @@ services:
     environment:
       SHIP_DATABASE_URL: postgresql://ship:ship_dev_password@postgres:5432/ship
       SHIP_KAFKA_BROKERS: kafka:9092
+      SHIP_JWT_SECRET: ${SHIP_JWT_SECRET:-local-development-only-change-this-secret}
     depends_on:
       postgres:
         condition: service_healthy
