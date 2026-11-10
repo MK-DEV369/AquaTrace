@@ -253,7 +253,7 @@ class NaturalLanguageProcessor:
         )
         try:
             return self.llm.chat(system, user)
-        except Exception as exc:
+        except Exception:
             return self._grounded_fallback_answer(results, prefix="LLM call failed; using grounded tool data.")
 
     @staticmethod

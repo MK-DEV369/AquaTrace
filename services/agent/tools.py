@@ -275,7 +275,7 @@ async def compare_vessel_baseline(mmsi: int, time_range: timedelta = timedelta(d
             }
             
             # Determine if current behavior is unusual using historical patterns
-            detector = AnomalyDetector()
+            AnomalyDetector()
             
             # Get recent events for comparison
             recent_cutoff = datetime.utcnow() - timedelta(hours=1)

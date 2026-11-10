@@ -2,7 +2,7 @@ import argparse
 import logging
 import time
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 

@@ -5,11 +5,10 @@ Final validation and testing script for AquaTrace AI Maritime Investigation Agen
 This script validates the complete implementation of the agentic AI system.
 """
 
-import asyncio
-import json
 import sys
 from datetime import datetime
 from pathlib import Path
+
 
 def print_header(title):
     """Print formatted header."""
@@ -136,7 +135,7 @@ def validate_features():
             future_features.append(feature["name"])
     
     if future_features:
-        print(f"\n📝 Future features to implement after MVP:")
+        print("\n📝 Future features to implement after MVP:")
         for feature in future_features:
             print(f"   • {feature}")
     
@@ -156,7 +155,7 @@ def validate_api_compatibility():
     ]
     
     all_compatible = True
-    for check, status in compatibility_checks:
+    for _check, status in compatibility_checks:
         print(f"   {status}")
     
     return all_compatible

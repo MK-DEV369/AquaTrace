@@ -6,10 +6,6 @@ This script demonstrates the core functionality of the agentic AI system
 without requiring database connections.
 """
 
-import asyncio
-import json
-from datetime import datetime, timedelta
-from typing import Dict, Any
 
 
 def demonstrate_agent_structure():
@@ -71,7 +67,7 @@ def demonstrate_tool_capabilities():
         print(f"\n{i}. {tool['name']}")
         print(f"   Purpose: {tool['description']}")
         print(f"   Use Case: {tool['use_case']}")
-        print(f"   Safety Level: ✅ Read-only, validated access")
+        print("   Safety Level: ✅ Read-only, validated access")
 
 
 def demonstrate_investigation_workflow():

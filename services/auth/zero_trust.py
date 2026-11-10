@@ -9,7 +9,7 @@ import json
 import secrets
 import time
 from datetime import datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from cryptography.fernet import Fernet
@@ -17,7 +17,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
 
-class SecurityLevel(str, Enum):
+class SecurityLevel(StrEnum):
     """Security levels for data and operations."""
     PUBLIC = "public"
     INTERNAL = "internal"

@@ -10,8 +10,8 @@ except ImportError as e:
 
 # Test websocket imports
 try:
-    from services.websocket.handler import WebSocketHandler
     from services.websocket.connection_manager import EnhancedConnectionManager
+    from services.websocket.handler import WebSocketHandler
     print('WebSocketHandler imported successfully')
     print('EnhancedConnectionManager imported successfully')
     

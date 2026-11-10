@@ -315,7 +315,7 @@ class ParameterOptimizer:
         
         if 'validity_scores' in candidate:
             validity = candidate['validity_scores']
-            for score_name, score in validity.items():
+            for _score_name, score in validity.items():
                 if isinstance(score, (int, float)):
                     scores.append(score)
         
@@ -789,12 +789,11 @@ class AdvancedDBSCAN:
             self.optimal_parameters = optimization_result['optimized_parameters']
             eps = self.optimal_parameters['eps']
             min_samples = self.optimal_parameters['min_samples']
-            optimization_method = self.optimal_parameters.get('method', 'unknown')
+            self.optimal_parameters.get('method', 'unknown')
         else:
             # Fallback to default parameters
             eps = 0.5
             min_samples = 5
-            optimization_method = 'default'
         
         # Scale features
         X_scaled = self.scaler.fit_transform(X)

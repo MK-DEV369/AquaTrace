@@ -15,13 +15,13 @@ The implementation includes:
 import asyncio
 import json
 from datetime import datetime, timedelta
-from typing import Dict, Any
+from typing import Any
 
-from services.agent.investigation_agent import MaritimeInvestigationAgent, InvestigationRequest
-from services.agent.transaction_manager import transaction_coordinator
-from services.agent.resource_manager import resource_manager
-from services.auth.zero_trust import zero_trust_manager, validation_schema_manager, security_auditor
 from services.agent.event_store import event_store_manager
+from services.agent.investigation_agent import InvestigationRequest, MaritimeInvestigationAgent
+from services.agent.resource_manager import resource_manager
+from services.agent.transaction_manager import transaction_coordinator
+from services.auth.zero_trust import security_auditor, validation_schema_manager, zero_trust_manager
 
 
 class EnhancedAgentDemonstration:
@@ -31,7 +31,7 @@ class EnhancedAgentDemonstration:
         self.demonstration_log = []
         self.start_time = datetime.utcnow()
         
-    def log_step(self, step_name: str, description: str, details: Dict[str, Any] = None):
+    def log_step(self, step_name: str, description: str, details: dict[str, Any] = None):
         """Log a demonstration step."""
         log_entry = {
             "step": step_name,
@@ -56,7 +56,7 @@ class EnhancedAgentDemonstration:
         )
         
         # Create investigation request
-        request = InvestigationRequest(
+        InvestigationRequest(
             question="Investigate vessel 533002002 for suspicious speed changes",
             context={"user_id": "demo_user", "priority": "high"},
             max_tools=3,
@@ -187,7 +187,7 @@ class EnhancedAgentDemonstration:
             
             self.log_step(
                 f"Event {i+1} Stored",
-                f"Event stored with checksum verification",
+                "Event stored with checksum verification",
                 {
                     "event_id": event_record.event_id,
                     "checksum": event_record.checksum,
@@ -256,7 +256,7 @@ class EnhancedAgentDemonstration:
         
         self.log_step(
             "Sandbox Created",
-            f"Secure sandbox created for investigation",
+            "Secure sandbox created for investigation",
             {
                 "sandbox_id": sandbox_id,
                 "isolation_features": ["resource", "network", "file_system", "memory", "cpu"]
@@ -284,7 +284,7 @@ class EnhancedAgentDemonstration:
             
             self.log_step(
                 f"Resource Acquired: {resource_type}",
-                f"Resource acquired in sandbox",
+                "Resource acquired in sandbox",
                 {
                     "resource_id": resource_id,
                     "type": resource_type,
@@ -330,7 +330,7 @@ class EnhancedAgentDemonstration:
             await resource_manager.release_resource(resource_id, sandbox_id)
             self.log_step(
                 f"Resource Released: {resource_id}",
-                f"Resource released from sandbox",
+                "Resource released from sandbox",
                 {"resource_id": resource_id, "owner": sandbox_id}
             )
         
@@ -735,23 +735,23 @@ async def main():
         print("\n" + "=" * 80)
         print("🎉 DEMONSTRATION SUCCESSFUL")
         print("=" * 80)
-        print(f"\n📊 Summary:")
+        print("\n📊 Summary:")
         print(f"   • Steps Executed: {result['steps_executed']}")
         print(f"   • Duration: {result['duration_seconds']:.1f} seconds")
         print(f"   • Features Demonstrated: {len(result['key_features_demonstrated'])}")
         
-        print(f"\n🚀 Key Features Demonstrated:")
+        print("\n🚀 Key Features Demonstrated:")
         for feature in result['key_features_demonstrated']:
             print(f"   ✅ {feature}")
         
-        print(f"\n📋 Accomplishments:")
+        print("\n📋 Accomplishments:")
         for accomplishment in result['accomplishments']:
             print(f"   {accomplishment}")
         
-        print(f"\n🎯 Next Phase:")
+        print("\n🎯 Next Phase:")
         print(f"   {result['next_phase']}")
         
-        print(f"\n🎉 The enhanced AquaTrace AI Maritime Investigation Agent is ready for production deployment!")
+        print("\n🎉 The enhanced AquaTrace AI Maritime Investigation Agent is ready for production deployment!")
         
     except Exception as e:
         print(f"\n❌ DEMONSTRATION FAILED: {str(e)}")

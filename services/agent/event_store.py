@@ -7,14 +7,14 @@ replay capabilities, and audit trail for all investigation activities.
 import hashlib
 import json
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 
-class EventStoreType(str, Enum):
+class EventStoreType(StrEnum):
     """Supported event store backends."""
     POSTGRESQL = "postgresql"
     REDIS = "redis"

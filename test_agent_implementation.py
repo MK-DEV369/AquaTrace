@@ -5,8 +5,7 @@ including tool execution, investigation workflows, and API endpoints.
 """
 
 import asyncio
-import json
-from datetime import datetime, timedelta
+
 
 # Test imports and basic functionality
 async def test_imports():
@@ -15,16 +14,7 @@ async def test_imports():
     
     try:
         from services.agent.tools import (
-            get_vessel_snapshot,
-            get_recent_anomalies,
-            get_vessel_track,
-            compare_vessel_baseline,
-            find_nearby_vessels,
-            draft_incident_report,
-            execute_tool,
-            get_tool,
-            list_tools,
-            TOOL_METADATA
+            TOOL_METADATA,
         )
         print("✓ All imports successful")
         
@@ -80,8 +70,8 @@ async def test_investigation_agent():
     
     try:
         from services.agent.investigation_agent import (
+            InvestigationRequest,
             MaritimeInvestigationAgent,
-            InvestigationRequest
         )
         
         # Create agent instance
@@ -148,7 +138,6 @@ async def test_integration():
     
     try:
         # Test tool execution function
-        from services.agent.tools import execute_tool
         
         # Mock test - just test that the function exists and can be called
         # (we won't actually execute tools that require database)

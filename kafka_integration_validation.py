@@ -5,11 +5,10 @@ Comprehensive test suite for AquaTrace AI Maritime Investigation Agent with Kafk
 This script validates the complete agentic AI system including Kafka integration.
 """
 
-import asyncio
-import json
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
+
 
 def print_header(title):
     """Print formatted header."""
@@ -73,7 +72,6 @@ def validate_agent_integration():
     
     try:
         from services.agent.investigation_agent import MaritimeInvestigationAgent
-        from services.agent.tools import TOOL_METADATA
         
         agent = MaritimeInvestigationAgent()
         print("✓ MaritimeInvestigationAgent created successfully")
@@ -83,7 +81,7 @@ def validate_agent_integration():
         # Test investigation request creation
         from services.agent.investigation_agent import InvestigationRequest
         
-        request = InvestigationRequest(
+        InvestigationRequest(
             question="Test investigation",
             context={"user_id": "test"},
             max_tools=3
@@ -104,22 +102,6 @@ def validate_fastapi_routes():
     try:
         from services.api.agent_router import router
         
-        expected_routes = [
-            "/api/v1/agent/investigate/start",
-            "/api/v1/agent/investigate/{session_id}/execute",
-            "/api/v1/agent/investigate/{session_id}/status",
-            "/api/v1/agent/investigate/{session_id}/cancel",
-            "/api/v1/agent/investigate/{session_id}/report",
-            "/api/v1/agent/tools",
-            "/api/v1/agent/execute-tool",
-            "/api/v1/agent/health",
-            "/api/v1/agent/kafka/status",
-            "/api/v1/agent/kafka/start",
-            "/api/v1/agent/kafka/stop",
-            "/api/v1/agent/kafka/consumer-sessions",
-            "/api/v1/agent/kafka/publish-investigation",
-            "/api/v1/agent/kafka/publish-alert"
-        ]
         
         # Check router properties
         print(f"✓ Router prefix: {router.prefix}")
@@ -146,14 +128,8 @@ def validate_kafka_integration():
     
     try:
         from services.kafka_integration import (
-            KafkaInvestigationConsumer,
-            KafkaInvestigationProducer,
+            get_kafka_status,
             kafka_consumer,
-            kafka_producer,
-            investigation_agent,
-            setup_kafka_integration,
-            stop_kafka_integration,
-            get_kafka_status
         )
         
         print("✓ Kafka integration modules imported successfully")

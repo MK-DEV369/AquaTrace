@@ -84,6 +84,7 @@ def build_map(
         for _ in range(len(vessel_data))
     ]
     vessel_data["label"] = vessel_data["mmsi"].astype(str)
+    vessel_data["course_angle"] = vessel_data["cog_degrees"].fillna(0)
     vessel_data["speed_color"] = vessel_data["sog_knots"].fillna(0).apply(
         lambda speed: [255, 104, 120, 230] if speed >= 18 else [73, 214, 255, 230]
     )
@@ -93,6 +94,7 @@ def build_map(
             data=vessel_data,
             get_icon="icon_data",
             get_position="[longitude, latitude]",
+            get_angle="course_angle",
             get_size=4,
             size_scale=8,
             pickable=True,

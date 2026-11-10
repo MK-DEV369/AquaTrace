@@ -4,6 +4,7 @@
 import sys
 import traceback
 
+
 def test_import(module_path, import_name=None):
     """Test importing a module."""
     try:
@@ -69,7 +70,7 @@ def main():
     try:
         from services.agent.investigation_agent import MaritimeInvestigationAgent
         agent = MaritimeInvestigationAgent()
-        print(f"✓ MaritimeInvestigationAgent can be instantiated")
+        print("✓ MaritimeInvestigationAgent can be instantiated")
         print(f"  Active sessions: {len(agent.active_sessions)}")
     except Exception as e:
         print(f"✗ Failed to instantiate MaritimeInvestigationAgent: {e}")
@@ -77,7 +78,7 @@ def main():
     # Check if we can access the FastAPI router
     try:
         from services.api.agent_router import router
-        print(f"✓ FastAPI router can be imported")
+        print("✓ FastAPI router can be imported")
         print(f"  Router prefix: {router.prefix}")
     except Exception as e:
         print(f"✗ Failed to access FastAPI router: {e}")

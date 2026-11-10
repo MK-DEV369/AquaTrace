@@ -2,9 +2,9 @@
 
 import secrets
 import uuid
-from math import asin, atan2, cos, degrees, radians, sin
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from math import asin, atan2, cos, degrees, radians, sin
 
 import psycopg
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
@@ -17,7 +17,12 @@ from services.api.phase2 import router as phase2_router
 from services.websocket.handler import get_websocket_handler
 from ship_analytics.agents import get_orchestrator, get_registry
 from ship_analytics.config import get_settings
-from ship_analytics.logging import configure_logging, get_correlation_id, get_logger, set_correlation_id
+from ship_analytics.logging import (
+    configure_logging,
+    get_correlation_id,
+    get_logger,
+    set_correlation_id,
+)
 from ship_analytics.metrics import render as render_metrics
 
 
@@ -305,6 +310,19 @@ async def vessel_track(mmsi: int, start: datetime, end: datetime) -> dict[str, o
             (mmsi, start, end),
         )
         points = list(await cursor.fetchall())
+        if not points:
+            # Fallback: derive a track from raw clean AIS events when the
+            # materialised track table has not been populated yet.
+            await cursor.execute(
+                """
+                SELECT event_time, ST_X(geom) AS longitude, ST_Y(geom) AS latitude, sog_knots, cog_degrees
+                FROM ais_event_clean
+                WHERE mmsi = %s AND event_time >= %s AND event_time <= %s
+                ORDER BY event_time
+                """,
+                (mmsi, start, end),
+            )
+            points = list(await cursor.fetchall())
     return {
         "type": "FeatureCollection",
         "features": [

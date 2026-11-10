@@ -13,13 +13,13 @@ import logging
 import uuid
 from collections.abc import Awaitable
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger("ship_analytics.agents")
 
 
-class AgentStatus(str, Enum):
+class AgentStatus(StrEnum):
     """Lifecycle state of a registered agent."""
 
     REGISTERED = "registered"

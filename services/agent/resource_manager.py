@@ -8,14 +8,14 @@ import asyncio
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from fastapi import HTTPException
 from pydantic import Field
 
 
-class ResourceType(str, Enum):
+class ResourceType(StrEnum):
     """Types of resources that can be managed."""
     DATABASE_CONNECTION = "database_connection"
     KAFKA_PRODUCER = "kafka_producer"
@@ -27,7 +27,7 @@ class ResourceType(str, Enum):
     COMPUTATION = "computation"
 
 
-class ResourceState(str, Enum):
+class ResourceState(StrEnum):
     """States for resource lifecycle management."""
     AVAILABLE = "available"
     ACQUIRED = "acquired"
@@ -59,7 +59,7 @@ class ResourceUsage:
     metadata: dict[str, Any] = None
 
 
-class CircuitBreakerState(str, Enum):
+class CircuitBreakerState(StrEnum):
     """States for circuit breaker."""
     CLOSED = "closed"
     OPEN = "open"

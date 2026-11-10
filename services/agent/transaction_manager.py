@@ -9,7 +9,7 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from fastapi import HTTPException
@@ -19,7 +19,7 @@ from services.agent.tools import TOOL_REGISTRY, execute_tool
 logger = logging.getLogger("transaction_manager")
 
 
-class TransactionState(str, Enum):
+class TransactionState(StrEnum):
     """Transaction states for distributed coordination."""
     PENDING = "pending"
     EXECUTING = "executing"
