@@ -15,6 +15,19 @@ The AquaTrace AI Maritime Investigation Agent is a comprehensive agentic AI syst
 > starting the API. Prediction sink processing is enabled with
 > `SHIP_ENABLE_PREDICTION=true` after trained model artifacts are available.
 
+### Final Delivery Notes
+
+- The repository contains the complete implemented AquaTrace application,
+  including the multi-agent API, Kafka sinks, Spark processing, dashboard,
+  force graph, security controls, validation scripts, and Docker deployment.
+- The large AISDK replay CSV under `data/aisdk-2026-11-01/` is intentionally
+  kept as local demonstration data and is not included in the Git repository.
+  The smaller `data/sample/ais_events.jsonl` fixture remains available for
+  reproducible demonstrations.
+- Live AISStream ingestion still requires a user-provided
+  `SHIP_AISSTREAM_API_KEY`; Ollama wording is optional, and prediction output
+  requires trained model artifacts plus `SHIP_ENABLE_PREDICTION=true`.
+
 ### ✅ Phase 1: Foundation - Investigation Tools API (COMPLETED)
 - **6 approved investigation tools** with comprehensive input validation
 - **WebSocket infrastructure** for real-time updates
